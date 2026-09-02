@@ -1001,7 +1001,7 @@ def main():
         assert victim.scene is scene, "he is in it now, whether he likes it or not"
         assert scene.kind == "mock", scene.kind
         assert scene.i < was, "and they break off mid-sentence to do it"
-        assert scene.cast[-1] is victim, "the last one in the cast is the victim"
+        assert scene.victim is victim, "and the scene knows who it is about"
         assert victim.mocked and not a.mocked, "and only him"
         step(400, lambda: victim.scene is None)
         assert victim.scene is None and a.scene is None, "it ends"
@@ -1048,6 +1048,41 @@ def main():
         assert victim._cross_until > 0.0, "the anger outlives the stomping"
         victim.vanish()
         print("ok  the one they laughed at storms off and stays cross")
+
+        # lift the one they are laughing at and the scene comes apart cleanly
+        rescued = roamer.Roamer(app, third, 0.0, floor)
+        scene = mock_him(rescued)
+        rescued.pick_up()
+        step(2)
+        assert rescued.scene is None, "he is out of it"
+        assert scene not in roamer.scenes, "and it is over for the other two"
+        assert all(one.state in ("rest", "walk") for one in pair), \
+            [one.state for one in pair]
+
+        # a three-way that loses one of them ends for the other two as well,
+        # rather than carrying on as a two-way with the roles shuffled
+        rescued.let_go()
+        park(pair + [rescued])
+        step(5)
+        big = rescued.scene
+        assert big is not None and len(big.cast) == 3, "a cast of three"
+        rescued.pick_up()
+        step(2)
+        assert big not in roamer.scenes, "lifting one ends it for all of them"
+        assert all(one.scene is None for one in pair), "nobody left in a scene"
+
+        # and holding him over them gets the pair of them turning round
+        for one in pair:
+            one.state, one.floor, one.y = "rest", floor, floor
+            one._until = time.monotonic() + 999.0
+            one.facing = 0.9
+        rescued.x = (pair[0].x + pair[1].x) / 2.0
+        rescued.y = floor - roamer.STAND_H - 120.0
+        step(40, lambda: all(one.state == "wtf" for one in pair))
+        assert all(one.state == "wtf" for one in pair), \
+            ("both of them", [one.state for one in pair])
+        rescued.vanish()
+        print("ok  rescuing him ends it, and both of them get the look")
 
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9

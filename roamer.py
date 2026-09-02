@@ -14,9 +14,13 @@ What he does:
     about, and eventually dozes off,
   * dropped beside a note he reaches out, takes hold of an edge and hangs
     there, swinging whenever the note is moved,
-  * two of them on the floor together stop and hold a conversation entirely in
-    gesture,
-  * and lifting one of them over the other gets you a look.
+  * two or three of them on the floor together stop and hold a conversation
+    entirely in gesture, one talking at a time and the rest watching him,
+  * one who turns up to a conversation already running stands at the edge of
+    it and is never once acknowledged,
+  * one who walks into the middle of it is pointed at and laughed at, and
+    stalks off with a face on him that takes a while to wear off,
+  * and lifting one of them over the others gets you a look from all of them.
 
 Cost
 ----
@@ -106,7 +110,7 @@ CHAT_R = 130.0          # near enough to strike up a conversation
 CHAT_GAP = 64.0         # ...and how close they end up standing
 CHAT_COOLDOWN = 45.0
 WATCH_R = 220.0         # near enough to a conversation to turn round for it
-TALK2 =(("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
+TALK2 = (("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
          ("say1", 46), ("agree", 24), ("part", 30))
 TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
          ("say1", 42), ("react", 22), ("say2", 44), ("agree", 24),
@@ -200,7 +204,8 @@ class _Scene:
     whoever stepped first would be a beat ahead of whoever stepped second.
     """
 
-    __slots__ = ("kind", "table", "cast", "i", "mid", "last_speaker")
+    __slots__ = ("kind", "table", "cast", "i", "mid", "last_speaker",
+                 "victim")
 
     def __init__(self, kind, table, cast):
         self.kind = kind
@@ -209,6 +214,10 @@ class _Scene:
         self.i = 0
         self.mid = sum(g.x for g in self.cast) / float(len(self.cast))
         self.last_speaker = None
+        # Held by name rather than read off the end of the cast: somebody
+        # lifted out of a scene is taken out of the cast before it is closed,
+        # and then the last one left in it is a mocker.
+        self.victim = None
 
     def speaker(self):
         """Whose turn it is, or None on a beat where nobody is talking."""
@@ -247,6 +256,7 @@ def _turn_on(scene, guy, now):
     scene.i = 0
     scene.last_speaker = None
     scene.cast.append(guy)
+    scene.victim = guy
     guy.scene = scene
     guy.role = len(scene.cast) - 1
     guy._watching = None
@@ -264,8 +274,7 @@ def _close(scene, now):
     if scene in scenes:
         scenes.remove(scene)
     for guy in list(scene.cast):
-        was_mocked = (scene.kind == "mock" and bool(scene.cast)
-                      and scene.cast[-1] is guy)
+        was_mocked = scene.kind == "mock" and scene.victim is guy
         guy.scene = None
         guy.role = 0
         guy._social_at = now
@@ -1257,7 +1266,7 @@ class Roamer(tk.Toplevel):
         walked in, so he is the last into the cast."""
         scene = self.scene
         return (scene is not None and scene.kind == "mock"
-                and bool(scene.cast) and scene.cast[-1] is self)
+                and scene.victim is self)
 
     def sociable(self, now):
         # Both a cooldown and having actually parted. A cooldown on its own
@@ -1411,7 +1420,10 @@ class Roamer(tk.Toplevel):
         one has. A written "ha ha" would be the first line anybody in this app
         had spoken, and it would cheapen a scene that is stronger silent.
         """
-        victim = scene.cast[-1]
+        victim = scene.victim
+        if victim is None or victim not in scene.cast:
+            _close(scene, now)
+            return
         self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
         self.hands = self.feet = None
         self.lean, self.phase = 0.0, 0.0

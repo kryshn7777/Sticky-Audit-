@@ -279,8 +279,34 @@ loops forever if they never move apart.
 
 Pick one of them up and hold him over the other, and the one left behind stops
 whatever he was doing, turns square to the front, drops his eyes off your
-pointer for the only time in his life, throws both hands out and asks you what
-exactly you think you are doing.
+pointer, throws both hands out and asks you what exactly you think you are
+doing. Hold him over two of them and both of them ask.
+
+**Three of them.** Three on the floor at once and they talk as three: one at a
+time, the other two turned to whoever is speaking, and the speaker working the
+room - one of them for the first half of what he is saying and the other for
+the second. It ends the way a two-way ends, and they go their separate ways.
+
+That is when all three are standing there as it starts. Turn up to one already
+running and you are outside it, and where you stop decides what happens next.
+
+Hang back and you watch. You follow whoever is talking, neither of them looks
+at you once, and when it ends they walk off in opposite directions and leave
+you standing in the middle of where it was.
+
+Walk into the middle of it and they break off mid-sentence, turn round, point,
+and laugh at you. You work out what is happening, stand there and take it, and
+then stalk away - faster than you walk, in a straight line, not looking at
+anything. The face stays on for a good while after you have stopped, and you
+are not in the mood to talk to anybody for a long time after that.
+
+Nobody holds a grudge. He is not avoiding those two in particular - nothing in
+the crew remembers anybody - he has simply had enough of everyone.
+
+There are two ways to end up in the middle: you put him there, or he walks
+into them, because they have never been able to see each other coming. And
+picking him up out of it is how you break it up - so if you hold him over the
+two who were laughing, they both get the look.
 
 **Getting him back.** Right-click him and choose *Send him home*, or use
 *Send him home* on that note's own right-click menu. Dropping him on his own
