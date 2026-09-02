@@ -1350,6 +1350,11 @@ class NoteWindow(tk.Toplevel):
             tracker.follow(self)
         self._settle_pose()
         self.apply_mascot()          # the clip's margin changes the window
+        # A clipped note that is not on top is a note you have just watched
+        # slide behind the very window you clipped it to. Pinning turns it on
+        # and leaves it on: unpinning does not take it away again, because by
+        # then it is a setting you have seen and can turn off yourself.
+        self.set_topmost(True)
         self._clip_in(0)
         self.flush()
         return True

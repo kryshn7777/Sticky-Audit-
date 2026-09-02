@@ -1266,15 +1266,23 @@ def main():
         pinned._apply_geometry(pinned.note["w"], pinned.note["h"],
                                pinned.note["x"], pinned.note["y"])
         pump(app.root)
+        # Off, so that pinning has to be what turns it on.
+        pinned.set_topmost(False)
         pinned._settle_drop(bar)
         pump(app.root)
         assert pinned.note["pin"], "dropping on a title bar must pin the note"
+        # The stored flag, not the window attribute: STICKYNOTE_TEST_NO_TOPMOST
+        # forces the attribute off, and that switch exists so the suite can be
+        # run without covering the screen. Asserting on it would check the
+        # harness rather than the note.
+        assert pinned.note["topmost"],             "a clipped note that is not on top slides behind what it is clipped to"
         assert pinned.note["pin"]["title"] == pin_title
         assert pinned in app.tracker.pinned, "and the tracker must start following it"
         assert pinned.canvas.find_withtag("clip"), "a paperclip must appear on it"
         if natural == "top":
             assert pinned.mascot.pose == "hang",                 "he cannot sit on an edge that is under a title bar"
         assert store.Store(data_file).get(note_id)["pin"], "the pin must persist"
+        assert store.Store(data_file).get(note_id)["topmost"],             "...and so must the appear-on-top it turned on"
 
         # ...and the note travels with the window it is clipped to
         assert pinned.canvas.find_withtag("clip"), "a paperclip must appear on it"
