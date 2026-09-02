@@ -107,6 +107,9 @@ CHAT_GAP = 64.0         # ...and how close they end up standing
 CHAT_COOLDOWN = 45.0
 TALK2 = (("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
          ("say1", 46), ("agree", 24), ("part", 30))
+TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
+         ("say1", 42), ("react", 22), ("say2", 44), ("agree", 24),
+         ("part", 30))
 
 # Which role is talking, by beat name. Everything else about a scene - who
 # looks at whom, who laughs, who is left standing - falls out of this and the
@@ -276,22 +279,30 @@ def _cast(now):
     left to each of them separately, A takes up with B while B is already
     taking up with C and the whole thing knots itself.
     """
-    free = sorted((g for g in crew if g.state in ("rest", "walk", "sleep")),
-                  key=lambda g: g.x)
-    i = 0
-    while i < len(free):
-        # A chain of them, each within talking distance of the last one and
-        # standing on the same floor.
-        group = [free[i]]
-        j = i + 1
-        while (j < len(free) and free[j].x - group[-1].x <= CHAT_R
-               and abs(free[j].y - group[-1].y) <= 30.0):
-            group.append(free[j])
-            j += 1
-        ready = [g for g in group if g.sociable(now)][:3]
-        if len(ready) >= 2:
-            _open(ready, "talk", TALK2, now)
-        i = j
+    # Grouped by floor first and chained along each one separately. Somebody
+    # standing on another floor between two of them has to be stepped over
+    # rather than stopped at: the pairing this replaced skipped him, and a
+    # chain that halts on him quietly stops the two either side from ever
+    # talking to each other.
+    bands = {}
+    for guy in crew:
+        if guy.state in ("rest", "walk", "sleep") and guy.floor is not None:
+            bands.setdefault(guy.floor, []).append(guy)
+    for band in bands.values():
+        band.sort(key=lambda g: g.x)
+        i = 0
+        while i < len(band):
+            # A chain of them, each within talking distance of the last.
+            group = [band[i]]
+            j = i + 1
+            while j < len(band) and band[j].x - group[-1].x <= CHAT_R:
+                group.append(band[j])
+                j += 1
+            ready = [g for g in group if g.sociable(now)][:3]
+            if len(ready) >= 2:
+                _open(ready, "talk",
+                      TALK3 if len(ready) > 2 else TALK2, now)
+            i = j
 
     held = [g for g in crew if g.state == "held"]
     if not held:
@@ -299,7 +310,10 @@ def _cast(now):
             guy._lift_since = None
         return
     for guy in crew:
-        if guy.state in ("held", "wtf"):
+        # Somebody on his way off the screen does not stop to stare. Without
+        # "leave" here, one of them asked to go gets caught by the look four
+        # frames into his jump and stands there in mid-air instead.
+        if guy.state in ("held", "wtf", "leave"):
             continue
         if any(guy.abandoned_by(h) for h in held):
             guy.notice_the_lift(now)

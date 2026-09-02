@@ -688,13 +688,30 @@ def main():
     # up, and an arm that has quietly stopped being an arm.
     roamer.STEP = 1.0 / 60.0            # pinned, so the physics repeats exactly
 
-    def crank(n, stop=None):
-        for i in range(n):
-            roamer.tick()
-            pump(app.root, 1)
-            if stop is not None and stop():
-                return i
-        return None
+    def steps(n, stop=None):
+        """Exactly n steps of the crew, and no others.
+
+        tick() arms a real timer on its way out, pump() runs it, and that one
+        arms the next, so a plain crank of five measured 106 steps here -
+        enough to run a whole conversation to its end before the assertion
+        underneath it had looked. The scene checks need a beat they can point
+        at, so they use this. _arm gives up when there is no root, so the root
+        goes away for the duration and is put back, armed, on the way out.
+        """
+        saved, roamer._root = roamer._root, None
+        roamer._cancel()
+        try:
+            for i in range(n):
+                roamer.tick()
+                pump(app.root, 1)
+                if stop is not None and stop():
+                    return i
+            return None
+        finally:
+            roamer._root = saved
+            roamer._arm(roamer.TICK_MS)
+
+    crank = steps
 
     reach = mascot_mod.UPPER_ARM + mascot_mod.FOREARM
     elbow, hand = mascot_mod._reach((0.0, 0.0), (500.0, 0.0),
@@ -874,6 +891,55 @@ def main():
         assert a.state != "chat" and b.state != "chat", "once, not on a loop"
         print("ok  two of them talk, and only the once")
 
+        step = steps
+
+        def park(guys, gap=roamer.CHAT_R * 0.6):
+            """Everybody on the floor, in a row, and willing to talk."""
+            for stale in list(roamer.scenes):
+                roamer._close(stale, roamer._time())
+            for k, one in enumerate(guys):
+                one.x = right - 460.0 + k * gap
+                one.state, one.floor, one.y = "rest", floor, floor
+                one.vx = one.vy = 0.0
+                one._until = time.monotonic() + 999.0
+                one._social_at = 0.0
+                one._social_until = 0.0
+
+        # three of them together talk as three, and everybody gets a turn
+        third = app.new_note("green")
+        pump(app.root)
+        trio = [a, b, roamer.Roamer(app, third, 0.0, floor)]
+        park(trio)
+        step(5)
+        assert all(one.state == "chat" for one in trio), \
+            [one.state for one in trio]
+        scene = trio[0].scene
+        assert scene is not None and len(scene.cast) == 3, "one cast of three"
+        assert all(one.scene is scene for one in trio), "and all in the same one"
+        assert sorted(one.role for one in trio) == [0, 1, 2], "distinct roles"
+        assert [one.x for one in scene.cast] == sorted(one.x for one in trio), \
+            "the cast is ordered left to right"
+        spoke = set()
+
+        def note_speaker():
+            scene = trio[0].scene
+            if scene is not None:
+                who = scene.speaker()
+                if who is not None:
+                    spoke.add(who.role)
+            return scene is None
+
+        step(600, note_speaker)
+        assert spoke == {0, 1, 2}, ("everybody gets a turn", spoke)
+        assert all(one.state == "walk" for one in trio), \
+            [one.state for one in trio]
+        step(600)
+        assert all(one.state != "chat" for one in trio), "once, not on a loop"
+        # Only the third one goes: a and b are the pair the checks either side
+        # of this one are built around.
+        trio[2].vanish()
+        print("ok  three of them talk, and everybody gets a turn")
+
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9
         b._until = time.monotonic() + 999.0
@@ -898,13 +964,14 @@ def main():
         assert abs(goer.y - floor) < 0.01, "he winds up before he jumps"
         crank(20, lambda: goer._launched)
         assert goer._launched and goer.vy < 0.0, (goer._launched, goer.vy)
-        high = goer.y
-        for _ in range(600):
-            roamer.tick()
-            pump(app.root, 1)
-            high = min(high, goer.y)
-            if goer not in roamer.crew:
-                break
+        peak = [goer.y]
+
+        def apex():
+            peak[0] = min(peak[0], goer.y)
+            return goer not in roamer.crew
+
+        crank(600, apex)
+        high = peak[0]
         assert floor - high > 100.0, ("that has to read as a leap", floor - high)
         assert goer not in roamer.crew and not goer.winfo_exists(), \
             "and he has to be gone off the screen at the end of it"
@@ -930,6 +997,11 @@ def main():
             "an unmoved pointer must still cost nothing but the timer"
         window.mascot.hush()
         print("ok  he goes home, and leaves nothing running behind him")
+
+        # The third sheet was only ever somewhere for the third of them to
+        # come from. The checks past here count what is on the desk.
+        app.trash_note(third.note["id"])
+        pump(app.root)
     roamer.STEP = None
 
     # --- pinning a note to another application's window -----------------------
