@@ -982,6 +982,31 @@ def main():
         onlooker.vanish()
         print("ok  one who turns up late hangs back and watches")
 
+        # ...and one who walks right into the middle of it gets what he asked
+        # for
+        victim = roamer.Roamer(app, third, 0.0, floor)
+        park(pair, gap=roamer.CHAT_GAP)
+        step(40)                        # let them get talking first
+        scene = a.scene
+        assert scene is not None and scene.kind == "talk", "a conversation"
+        was = scene.i
+        victim.state, victim.floor, victim.y = "rest", floor, floor
+        victim.vx = victim.vy = 0.0
+        victim.scene = None
+        victim._until = time.monotonic() + 999.0
+        victim._social_at = 0.0
+        victim._social_until = 0.0
+        victim.x = scene.mid            # straight into the gap
+        step(3)
+        assert victim.scene is scene, "he is in it now, whether he likes it or not"
+        assert scene.kind == "mock", scene.kind
+        assert scene.i < was, "and they break off mid-sentence to do it"
+        assert scene.cast[-1] is victim, "the last one in the cast is the victim"
+        assert victim.mocked and not a.mocked, "and only him"
+        step(400, lambda: victim.scene is None)
+        assert victim.scene is None and a.scene is None, "it ends"
+        print("ok  walk into a conversation and the two of them turn on you")
+
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9
         b._until = time.monotonic() + 999.0

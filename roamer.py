@@ -111,6 +111,9 @@ TALK2 =(("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
 TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
          ("say1", 42), ("react", 22), ("say2", 44), ("agree", 24),
          ("part", 30))
+# Shorter than a conversation on purpose. Cruelty is quick.
+MOCK = (("notice", 18), ("point", 40), ("laugh", 54), ("burn", 30),
+        ("storm", 26))
 
 # Which role is talking, by beat name. Everything else about a scene - who
 # looks at whom, who laughs, who is left standing - falls out of this and the
@@ -226,6 +229,25 @@ def _open(group, kind, table, now):
     return scene
 
 
+def _turn_on(scene, guy, now):
+    """He has walked into the middle of it. They stop and turn on him.
+
+    The scene is not torn down and built again: the same two keep their roles
+    and the beat index goes back to nothing, which is what makes them break
+    off mid-sentence rather than finish the thought.
+    """
+    scene.kind = "mock"
+    scene.table = MOCK
+    scene.i = 0
+    scene.last_speaker = None
+    scene.cast.append(guy)
+    guy.scene = scene
+    guy.role = len(scene.cast) - 1
+    guy._watching = None
+    guy._stir_at = now
+    guy._begin("chat", now)
+
+
 def _close(scene, now):
     """Everybody out, and away in different directions.
 
@@ -339,7 +361,11 @@ def _cast(now):
                 guy._watching = None
                 guy._begin("rest", now)
             continue
-        guy.watch(scene, now)
+        span = max(abs(g.x - scene.mid) for g in scene.cast)
+        if scene.kind == "talk" and abs(guy.x - scene.mid) < max(span, 1.0):
+            _turn_on(scene, guy, now)       # he is standing in the gap
+        elif abs(guy.x - scene.mid) < WATCH_R:
+            guy.watch(scene, now)
 
     held = [g for g in crew if g.state == "held"]
     if not held:
@@ -1190,6 +1216,14 @@ class Roamer(tk.Toplevel):
             return None
         return scene.cast[1 - self.role]
 
+    @property
+    def mocked(self):
+        """Am I the one being laughed at? In a mock the victim is the one who
+        walked in, so he is the last into the cast."""
+        scene = self.scene
+        return (scene is not None and scene.kind == "mock"
+                and bool(scene.cast) and scene.cast[-1] is self)
+
     def sociable(self, now):
         # Both a cooldown and having actually parted. A cooldown on its own
         # loops forever if they never move apart; parting on its own starts
@@ -1221,7 +1255,10 @@ class Roamer(tk.Toplevel):
             return
         if beat in SPEAKS:
             scene.last_speaker = scene.speaker()
-        self._talk_beat(scene, beat, u, now)
+        if scene.kind == "mock":
+            self._mock_beat(scene, beat, u, now)
+        else:
+            self._talk_beat(scene, beat, u, now)
 
     def watch(self, scene, now):
         if self.state == "watch" and self._watching is scene:
@@ -1329,6 +1366,63 @@ class Roamer(tk.Toplevel):
             if u < 0.5:
                 self.hands = self._one_hand(side, 20.0,
                                             -18.0 + math.sin(u * 18.0) * 4.0)
+
+    def _mock_beat(self, scene, beat, u, now):
+        """Two of them pointing, and the one they are pointing at.
+
+        Carried the same way the conversation is - by where they are facing
+        and what their faces are doing - and with no more dialogue than that
+        one has. A written "ha ha" would be the first line anybody in this app
+        had spoken, and it would cheapen a scene that is stronger silent.
+        """
+        victim = scene.cast[-1]
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.lean, self.phase = 0.0, 0.0
+        self.y = self._floor_y()
+
+        if self is victim:
+            others = [g for g in scene.cast if g is not self]
+            # Looking from one of them to the other while it dawns on him,
+            # and then his eyes go down and stay down.
+            who = others[min(len(others) - 1, int(u * 2.0))] if others else None
+            if beat in ("burn", "storm") or who is None:
+                self.look = (0.0, 0.6)
+                self.facing = _mix(self.facing, 0.0, 0.12)
+            else:
+                self.facing = _clamp((who.x - self.x) / 70.0, -1.0, 1.0)
+                self.look = _aim((self.x, self._face_y()),
+                                 (who.x, who._face_y()))
+            if beat == "notice":
+                self.face = FACES["calm"]
+            elif beat == "point":
+                self.face = _face_mix(FACES["calm"], FACES["think"], _smooth(u))
+            elif beat == "laugh":
+                self.face = _face_mix(FACES["think"], FACES["cross"], _smooth(u))
+            else:
+                # Standing there taking it: not a flinch, a held tension.
+                self.face = FACES["cross"]
+                self.roll = math.sin(now * 11.0 * TAU) * 0.015
+                self.squash = 1.0 + math.sin(now * 9.0 * TAU) * 0.012
+            return
+
+        side = 1.0 if victim.x > self.x else -1.0
+        self.facing = _clamp((victim.x - self.x) / 70.0, -1.0, 1.0)
+        self.look = _aim((self.x, self._face_y()),
+                         (victim.x, victim._face_y()))
+        if beat == "notice":
+            self.face = _face_mix(FACES["calm"], FACES["smug"], _smooth(u))
+        elif beat == "point":
+            self.face = FACES["smug"]
+            self.hands = self._one_hand(side, 30.0, -4.0)
+        elif beat == "laugh":
+            self.face = FACES["laugh"]
+            fy = self._face_y()
+            self.hands = ((self.x - 30.0, fy + 6.0), (self.x + 30.0, fy + 6.0))
+            self.y = self._floor_y() - abs(math.sin(u * math.pi * 3.0)) * 5.0
+        else:
+            # Winding down, still pleased with themselves.
+            self.face = _face_mix(FACES["laugh"], FACES["happy"], _smooth(u))
 
     def _one_hand(self, side, out, up):
         point = (self.x + side * out, self._face_y() + up)
