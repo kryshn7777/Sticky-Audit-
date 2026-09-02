@@ -282,6 +282,17 @@ whatever he was doing, turns square to the front, drops his eyes off your
 pointer, throws both hands out and asks you what exactly you think you are
 doing. Hold him over two of them and both of them ask.
 
+**They go and find each other.** A walk used to be a random stretch off
+wherever he happened to be standing, which is fine for one of them and useless
+for three: on a thousand pixels of taskbar they drift apart on the first walk
+and never come back within talking distance again. Dropped a screen apart and
+left alone for two minutes, nothing below this line ever once happened. So most
+walks are now aimed at somebody. Drop three of them anywhere along the bar and
+the first conversation starts within about ten seconds.
+
+One who has just been laughed at is the exception - he wants nothing to do with
+anybody until the face has worn off, and walks off on his own until it has.
+
 **Three of them.** Three on the floor at once and they talk as three: one at a
 time, the other two turned to whoever is speaking, and the speaker working the
 room - one of them for the first half of what he is saying and the other for
@@ -294,6 +305,12 @@ Hang back and you watch. You follow whoever is talking, neither of them looks
 at you once, and when it ends they walk off in opposite directions and leave
 you standing in the middle of where it was.
 
+Some of them cannot leave it there. A conversation is over in about four
+seconds and the edge of earshot is a five second walk, so anybody who stops out
+there is stuck watching whether he likes it or not - unless he closes the last
+of the gap himself. The nosy sort does: he sidles in, slower than he walks,
+until he is close enough to be noticed. And then he is noticed.
+
 Walk into the middle of it and they break off mid-sentence, turn round, point,
 and laugh at you. You work out what is happening, stand there and take it, and
 then stalk away - faster than you walk, in a straight line, not looking at
@@ -303,10 +320,15 @@ are not in the mood to talk to anybody for a long time after that.
 Nobody holds a grudge. He is not avoiding those two in particular - nothing in
 the crew remembers anybody - he has simply had enough of everyone.
 
-There are two ways to end up in the middle: you put him there, or he walks
-into them, because they have never been able to see each other coming. And
+There are three ways to end up in the middle: you put him there, he walks
+straight into them, or he watches from the edge and cannot help himself. And
 picking him up out of it is how you break it up - so if you hold him over the
 two who were laughing, they both get the look.
+
+Which of the three you get is down to who is free to talk when. They do not all
+come off a conversation at the same moment - one of them is held back, some of
+the time - and that is the whole supply of odd ones out. Everybody free at once
+is a three-way; somebody still cooling off is a pair with an audience.
 
 **Getting him back.** Right-click him and choose *Send him home*, or use
 *Send him home* on that note's own right-click menu. Dropping him on his own

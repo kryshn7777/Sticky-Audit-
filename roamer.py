@@ -12,14 +12,19 @@ What he does:
     he was going, and picks himself up,
   * on the floor - the top of the taskbar - he walks a stretch, stops, looks
     about, and eventually dozes off,
+  * most of those stretches are walked at somebody rather than at nowhere in
+    particular, which is the only reason any of the rest of this ever happens
+    - given a random leg each they drift apart and stay apart,
   * dropped beside a note he reaches out, takes hold of an edge and hangs
     there, swinging whenever the note is moved,
   * two or three of them on the floor together stop and hold a conversation
     entirely in gesture, one talking at a time and the rest watching him,
   * one who turns up to a conversation already running stands at the edge of
-    it and is never once acknowledged,
-  * one who walks into the middle of it is pointed at and laughed at, and
-    stalks off with a face on him that takes a while to wear off,
+    it and is never once acknowledged - unless he is the nosy sort, and then
+    he sidles in until he is,
+  * one who gets into the middle of it, by sidling or by being dropped there,
+    is pointed at and laughed at, and stalks off with a face on him that takes
+    a while to wear off,
   * and lifting one of them over the others gets you a look from all of them.
 
 Cost
@@ -109,7 +114,15 @@ SWING_MAX = 7.0
 CHAT_R = 130.0          # near enough to strike up a conversation
 CHAT_GAP = 64.0         # ...and how close they end up standing
 CHAT_COOLDOWN = 45.0
+CHAT_STAGGER = 30.0     # ...one of them held back this much, sometimes
+LATE_ODDS = 0.35        # how often somebody is the one held back
+RALLY_R = CHAT_R * 3.0  # how far off they will wait for one more to arrive
 WATCH_R = 220.0         # near enough to a conversation to turn round for it
+SEEK_ODDS = 0.75        # how much of a walk is aimed at somebody
+NOSY_ODDS = 0.35        # ...and how much of the watching turns into barging in
+CREEP_SPEED = WALK_SPEED * 0.8   # sidling in is slower than walking, but
+                                 # not so slow he never arrives: a talk is
+                                 # over in four seconds
 TALK2 = (("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
          ("say1", 46), ("agree", 24), ("part", 30))
 TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
@@ -273,11 +286,20 @@ def _close(scene, now):
     """
     if scene in scenes:
         scenes.remove(scene)
+    # Sometimes one of them is held back off the cooldown. All of them coming
+    # free together is a group that always reforms whole, and there is never
+    # an odd one out to be left watching or walked in on; all of them held
+    # back by a different amount is the opposite, and a three-way never
+    # happens at all. So it is one of them, some of the time. An empty cast
+    # is a scene everybody has already been lifted out of, and there is
+    # nobody left to hold back.
+    late = (random.choice(scene.cast)
+            if scene.cast and random.random() < LATE_ODDS else None)
     for guy in list(scene.cast):
         was_mocked = scene.kind == "mock" and scene.victim is guy
         guy.scene = None
         guy.role = 0
-        guy._social_at = now
+        guy._social_at = now + (CHAT_STAGGER if guy is late else 0.0)
         if guy.state != "chat":
             continue
         if was_mocked:
@@ -324,10 +346,15 @@ def tick():
     _arm(delay)
 
 
-def _scene_near(guy):
+def _scene_near(guy, reach=WATCH_R):
     """The running scene he has walked in on, if any: the nearest one on his
-    own floor that he is not already part of."""
-    best, near = None, WATCH_R
+    own floor that he is not already part of.
+
+    The reach is how far he is prepared to notice from: as far as he can see
+    when he is picking somewhere to walk, and only WATCH_R when the question
+    is whether he has arrived at it.
+    """
+    best, near = None, reach
     for scene in scenes:
         if not scene.cast or guy in scene.cast:
             continue
@@ -337,6 +364,29 @@ def _scene_near(guy):
         if gap < near:
             best, near = scene, gap
     return best
+
+
+def _incoming(band, group, now):
+    """Is somebody else still on his way over to this lot?
+
+    Whichever two are nearest arrive first, and starting the moment they do
+    leaves the third walking in on a conversation that would have had him in
+    it had it waited half a second. Measured over three minutes, that was
+    every scene a pair and never once a three-way. So they hold off while
+    anyone is walking in at them - he is only half a second away.
+    """
+    if len(group) >= 3:
+        return False
+    mid = sum(g.x for g in group) / float(len(group))
+    for guy in band:
+        if guy in group or guy.state != "walk" or not guy.sociable(now):
+            continue
+        # Walking, and walking this way. Somebody heading off in the other
+        # direction is not somebody to stand about waiting for, and one who is
+        # a rally away is too far off to wait for either.
+        if abs(guy.x - mid) < RALLY_R and (mid - guy.x) * (guy._goal - guy.x) > 0:
+            return True
+    return False
 
 
 def _cast(now):
@@ -366,7 +416,7 @@ def _cast(now):
                 group.append(band[j])
                 j += 1
             ready = [g for g in group if g.sociable(now)][:3]
-            if len(ready) >= 2:
+            if len(ready) >= 2 and not _incoming(band, group, now):
                 _open(ready, "talk",
                       TALK3 if len(ready) > 2 else TALK2, now)
             i = j
@@ -542,6 +592,7 @@ class Roamer(tk.Toplevel):
         self.scene = None
         self.role = 0
         self._watching = None
+        self._nosy = False
         self._social_at = 0.0
         self._social_until = 0.0
         self._cross_until = 0.0
@@ -760,10 +811,15 @@ class Roamer(tk.Toplevel):
         elif state == "walk":
             self._stir_at = now
             x1, x2 = self.walk_line
-            span = random.uniform(LEG_MIN, LEG_MAX) * random.choice((-1.0, 1.0))
-            self._goal = _clamp(self.x + span, x1, x2)
-            if abs(self._goal - self.x) < 20.0:
-                self._goal = x2 if self.x < (x1 + x2) / 2.0 else x1
+            want = self._company(now)
+            if want is not None:
+                self._goal = _clamp(want, x1, x2)
+            else:
+                span = (random.uniform(LEG_MIN, LEG_MAX)
+                        * random.choice((-1.0, 1.0)))
+                self._goal = _clamp(self.x + span, x1, x2)
+                if abs(self._goal - self.x) < 20.0:
+                    self._goal = x2 if self.x < (x1 + x2) / 2.0 else x1
             self.hands = self.feet = None
 
     def rate(self):
@@ -1268,6 +1324,37 @@ class Roamer(tk.Toplevel):
         return (scene is not None and scene.kind == "mock"
                 and scene.victim is self)
 
+    def _company(self, now):
+        """Where he would rather be walking than nowhere in particular.
+
+        Every leg used to be a random span off wherever he stood, which on a
+        thousand pixels of taskbar is a random walk: three of them drift apart
+        on the first leg and never come back inside CHAT_R again. Measured over
+        two minutes with them dropped a screen apart, that was no conversation
+        at all - the scenes underneath were all reachable and none of them was
+        ever reached. So most legs are aimed at somebody instead.
+
+        Not gated on being up for talking. One still cooling off wanders over
+        anyway, and that is the whole supply of onlookers: somebody has to be
+        stood near a conversation he is not in for there to be one.
+        """
+        if random.random() > SEEK_ODDS or now < self._cross_until:
+            return None                 # in a huff, or off on his own
+        scene = _scene_near(self, float("inf"))
+        if scene is not None:
+            return scene.mid
+        near = None
+        for other in crew:
+            if (other is self or other.floor is None or self.floor is None
+                    or abs(other.floor - self.floor) > 4.0
+                    or other.state not in ("rest", "walk", "chat", "watch")):
+                continue
+            if near is None or abs(other.x - self.x) < abs(near.x - self.x):
+                near = other
+        if near is None or abs(near.x - self.x) <= CHAT_GAP:
+            return None
+        return near.x - math.copysign(CHAT_GAP, near.x - self.x)
+
     def sociable(self, now):
         # Both a cooldown and having actually parted. A cooldown on its own
         # loops forever if they never move apart; parting on its own starts
@@ -1309,30 +1396,47 @@ class Roamer(tk.Toplevel):
         if self.state == "watch" and self._watching is scene:
             return
         self._watching = scene
+        # Decided once, on arrival, rather than every frame: whether he has
+        # the manners to stay out of it. Without this there is no way into
+        # being laughed at on his own - he is stopped at WATCH_R the moment
+        # a scene starts near him, and a conversation is over in four seconds,
+        # which is not long enough to walk in from out there.
+        self._nosy = random.random() < NOSY_ODDS
         self._begin("watch", now)
 
-    def _do_watch(self, now, _dt):
+    def _do_watch(self, now, dt):
         """Stood at the edge of somebody else's conversation.
 
         His eyes come off the pointer, which nothing but the look out at the
         camera does, and for the same reason: there is something on the screen
         more interesting than the user. Nobody in the scene ever acknowledges
-        him. That is the whole of it.
+        him. That is the whole of it - unless he is the nosy sort, and then he
+        edges in, slower than he walks, until he is close enough to be noticed.
         """
         scene = self._watching
         if scene is None or scene not in scenes or not scene.cast:
             self._watching = None
             self._begin("rest", now)
             return
+        self.squash, self.roll, self.crouch, self.lean = 1.0, 0.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.y = self._floor_y()
+        self.face = _face_mix(FACES["calm"], FACES["happy"], 0.30)
+        if self._nosy and abs(self.x - scene.mid) > 1.0:
+            way = 1.0 if scene.mid > self.x else -1.0
+            x1, x2 = self._walls()
+            self.x = _clamp(self.x + way * CREEP_SPEED * dt, x1, x2)
+            self.phase += CREEP_SPEED * dt / STEP_PX * math.pi
+            self.lean = way * 1.2
+        else:
+            self.phase = 0.0
+        # Aimed last, from where he has got to rather than from where he stood
+        # a frame ago: a head pointed at the speaker from his old position is
+        # a head pointed slightly past him.
         who = scene.speaker() or scene.last_speaker or scene.cast[0]
         self.facing = _clamp((who.x - self.x) / 70.0, -1.0, 1.0)
         self.look = _aim((self.x, self._face_y()),
                          (who.x, who._face_y()))
-        self.squash, self.roll, self.crouch, self.lean = 1.0, 0.0, 0.0, 0.0
-        self.hands = self.feet = None
-        self.phase = 0.0
-        self.y = self._floor_y()
-        self.face = _face_mix(FACES["calm"], FACES["happy"], 0.30)
 
     def _who_to_watch(self, scene, u):
         """Whose head my eyes are on this frame.

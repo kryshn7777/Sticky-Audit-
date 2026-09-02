@@ -21,6 +21,24 @@ os.environ["APPDATA"] = FAKE_APPDATA
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+if os.environ.get("STICKYNOTE_TEST_NO_TOPMOST"):
+    # These are real windows, and real windows sit on top of whatever the
+    # person running the suite is doing for the minute or two it takes. Set
+    # STICKYNOTE_TEST_NO_TOPMOST=1 to get the screen back. Off by default, so
+    # what runs unattended is still what ships. The foreign window the clip
+    # check puts up is a separate process and stays on top either way, which
+    # is the point of it.
+    import tkinter as _tk
+
+    _real_attributes = _tk.Wm.attributes
+
+    def _no_topmost(self, *args):
+        if len(args) >= 2 and args[0] == "-topmost":
+            args = ("-topmost", False) + args[2:]
+        return _real_attributes(self, *args)
+
+    _tk.Wm.attributes = _no_topmost
+
 
 def _load_entrypoint():
     """stickynote.pyw is not importable by name, so load it by path."""
@@ -948,6 +966,9 @@ def main():
         # distance of the pair - so he can never be cast, only an audience.
         onlooker.x = (pair[0].x + pair[1].x) / 2.0 + 200.0
         step(8)
+        # This one has the manners to stay out of it. The nosy sort edges in
+        # instead, and gets laughed at for it - that is the check below.
+        onlooker._nosy = False
         scene = a.scene
         assert scene is not None and len(scene.cast) == 2, "the two of them"
         assert onlooker not in scene.cast, "he is not in it"
@@ -1083,6 +1104,60 @@ def main():
             ("both of them", [one.state for one in pair])
         rescued.vanish()
         print("ok  rescuing him ends it, and both of them get the look")
+
+        # left to themselves on an empty taskbar, they go and find each other.
+        # Every scene above starts with them already stood together, which is
+        # the one thing the real thing never does: dropped a screen apart and
+        # given a random leg each they drift, and three minutes of it measured
+        # nothing at all - every scene underneath reachable and none reached.
+        finder = roamer.Roamer(app, third, 0.0, floor)
+        far = [a, b, finder]
+        for stale in list(roamer.scenes):
+            roamer._close(stale, roamer._time())
+        for k, one in enumerate(far):
+            one.x = left + 60.0 + k * (right - left - 120.0) / 2.0
+            one.state, one.floor, one.y = "rest", floor, floor
+            one.vx = one.vy = 0.0
+            one._until = 0.0
+            one._social_at = one._social_until = one._cross_until = 0.0
+        assert min(abs(one.x - other.x) for one in far for other in far
+                   if one is not other) > roamer.CHAT_R,             "they have to start out of reach of each other"
+        met = step(60 * 40, lambda: bool(roamer.scenes))
+        assert met is not None,             "spread out and left alone they never once got together"
+        assert met < 60 * 30, ("and it must not take all day", met / 60.0)
+        print("ok  spread out on the taskbar, they go and find each other")
+
+        # ...and a nosy onlooker closes the last of the gap himself, which is
+        # the only way into being laughed at that does not need a hand to drop
+        # him there: a talk is over in four seconds and the edge of WATCH_R is
+        # a five second walk, so whoever stops out there has to be able to
+        # sidle in.
+        for one in far:
+            one._leave_scene(roamer._time())
+            one._begin("rest", roamer._time())
+            one._until = time.monotonic() + 999.0
+        # Well out of it, and in no mood, so he can neither be cast in the
+        # conversation nor keep the pair of them waiting for him.
+        finder.x = left + 40.0
+        finder._social_until = roamer._time() + 999.0
+        park(pair, gap=roamer.CHAT_GAP)
+        step(60, lambda: a.scene is not None)
+        talk = a.scene
+        assert talk is not None and len(talk.cast) == 2, "the two of them first"
+        finder.x = talk.mid + roamer.WATCH_R * 0.5
+        finder.state, finder.floor, finder.y = "rest", floor, floor
+        finder._until = time.monotonic() + 999.0
+        step(3)
+        assert finder.state == "watch", finder.state
+        finder._nosy = True
+        was = abs(finder.x - talk.mid)
+        step(60)
+        assert abs(finder.x - talk.mid) < was - 20.0,             ("he has to be closing the gap", was, abs(finder.x - talk.mid))
+        step(300, lambda: finder.scene is not None)
+        assert finder.scene is not None and finder.scene.kind == "mock",             "and edging in has to get him laughed at"
+        assert finder.scene.victim is finder, "he is the one they turn on"
+        finder.vanish()
+        print("ok  a nosy onlooker edges in and gets himself laughed at")
 
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9
