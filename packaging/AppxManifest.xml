@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for Microsoft Store submission.
+
+  Three values here MUST match your Partner Center listing exactly, character
+  for character, or the Store rejects the upload. Partner Center shows all
+  three under Product > Product identity once you have reserved the name.
+  package.ps1 substitutes them, so do not edit them by hand:
+
+    __IDENTITY_NAME__       e.g. 12345YourPublisher.StickyNotesPaper
+    __PUBLISHER__           e.g. CN=A1B2C3D4-0000-0000-0000-123456789ABC
+    __PUBLISHER_DISPLAY__   your publisher display name
+
+  runFullTrust is what lets a packaged desktop application run at all. It is
+  a restricted capability: the Store asks you to justify it during submission.
+  The justification is one sentence - "Win32 desktop application packaged with
+  the MSIX Packaging Tool" - and it is routinely approved for desktop apps.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 rescap">
+
+  <Identity
+    Name="__IDENTITY_NAME__"
+    Publisher="__PUBLISHER__"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>__DISPLAY_NAME__</DisplayName>
+    <PublisherDisplayName>__PUBLISHER_DISPLAY__</PublisherDisplayName>
+    <Logo>Images\StoreLogo.png</Logo>
+    <Description>Sticky notes that live on your desktop and stay there. Offline, no account, near-zero resource use.</Description>
+  </Properties>
+
+  <Dependencies>
+    <!-- 10.0.17763 = Windows 10 1809, the oldest release still serviced. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0"
+                        MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="StickyNote" Executable="StickyNote.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="__DISPLAY_NAME__"
+        Description="Sticky notes that live on your desktop and stay there."
+        BackgroundColor="transparent"
+        Square150x150Logo="Images\Square150x150Logo.png"
+        Square44x44Logo="Images\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Images\Wide310x150Logo.png"
+          Square71x71Logo="Images\Square71x71Logo.png"
+          Square310x310Logo="Images\Square310x310Logo.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!--
+          A packaged app cannot start itself at login by writing the Run key:
+          that write is redirected into the package's private registry hive and
+          Windows never reads it. This declares a real startup task instead. It
+          ships disabled, so it appears in Settings > Apps > Startup and in Task
+          Manager for the user to switch on - which is the behaviour Store
+          certification expects, rather than an app that starts itself.
+        -->
+        <uap5:Extension Category="windows.startupTask"
+                        Executable="StickyNote.exe"
+                        EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="StickyNoteStartup" Enabled="false"
+                            DisplayName="__DISPLAY_NAME__" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- The only capability this app needs. It opens no network connection,
+         reads no library, and touches nothing outside its own user data. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

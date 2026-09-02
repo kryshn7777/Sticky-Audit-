@@ -1,0 +1,16 @@
+Create an interactive sticky-note component with the following behavior and visual requirements:
+
+* **Drag & drop:** The entire sticky note is clickable and draggable. It can be freely repositioned around the canvas by clicking and dragging.
+* **Colors:** Provide three sticky-note color options: **blue, green, and yellow**.
+* **Typography:** All user-entered text must use a natural **handwritten-style font**.
+* **Text structure:** Each sticky note has:
+
+  * A single-line **heading** at the top.
+  * Pressing **Enter** while editing the heading confirms it and moves the cursor into the content area.
+  * The content area supports multiline text.
+  * **Shift + Enter** creates a new line within the current text area.
+* **Auto-sizing:** The sticky note automatically expands horizontally and/or vertically as needed so that all entered content remains visible without being clipped.
+* **Editing:** Text remains editable after the note is created.
+* **Interaction:** Dragging the note should not accidentally modify or delete its text. Text editing and dragging should feel distinct and predictable.
+* **Visual design:** Use a clean, minimal sticky-note appearance with subtle rounded corners, a slight shadow, and enough padding for the handwritten text to remain readable.
+* **Persistence:** Preserve the note’s color, position, heading, and content while it remains on the canvas.

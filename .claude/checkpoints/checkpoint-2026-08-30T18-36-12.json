@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-08-30T18:36:12.673Z",
+  "projectRoot": "C:\\Claude Projects\\StickyNote",
+  "instincts": {
+    "instincts": [
+      {
+        "id": "compose-lazy-key",
+        "type": "pattern",
+        "description": "LazyColumn/LazyRow with stable keys",
+        "context": "jetpack-compose",
+        "confidence": 1,
+        "createdAt": "2026-07-24T20:56:20.956Z",
+        "lastUsed": "2026-08-29T19:18:16.806Z",
+        "usageCount": 188
+      },
+      {
+        "id": "coroutine-structured",
+        "type": "pattern",
+        "description": "Structured concurrency with viewModelScope",
+        "context": "coroutines-patterns",
+        "confidence": 1,
+        "createdAt": "2026-08-12T23:11:32.460Z",
+        "lastUsed": "2026-08-28T12:13:41.647Z",
+        "usageCount": 2394
+      }
+    ],
+    "version": "1.0",
+    "lastUpdated": "2026-08-29T19:18:16.808Z"
+  },
+  "gitBranch": "unknown",
+  "lastFiles": []
+}

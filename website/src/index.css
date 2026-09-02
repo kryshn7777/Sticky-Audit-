@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Kalam:wght@400;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-neo-bg: #F4F4F0;
+  --color-neo-yellow: #FFF200;
+  --color-neo-blue: #00E5FF;
+  --color-neo-pink: #FF3366;
+  --color-neo-green: #00FF66;
+  --color-neo-orange: #FF6600;
+  --color-brand-dark: #000000;
+  
+  --color-sticky-yellow: #fdf6b1;
+  --color-sticky-green: #dcfce7;
+  --color-sticky-blue: #e0f2fe;
+  --color-sticky-pink: #fae8ff;
+  --color-sticky-purple: #f3e8ff;
+  
+  --font-sans: "Space Grotesk", sans-serif;
+  --font-handwriting: "Kalam", cursive;
+}
+
+.neo-shadow {
+  box-shadow: 6px 6px 0px #000000;
+}
+
+.neo-shadow-sm {
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.neo-shadow-lg {
+  box-shadow: 10px 10px 0px #000000;
+}
+
+.neo-btn {
+  @apply border-3 border-black font-bold uppercase transition-transform active:translate-x-1 active:translate-y-1 bg-neo-yellow text-black px-6 py-3 cursor-pointer;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.neo-btn:active {
+  box-shadow: 0px 0px 0px #000000;
+}
+
+.neo-card {
+  @apply border-3 border-black bg-white;
+  box-shadow: 6px 6px 0px #000000;
+}
+
+.sticky-cut {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 2rem), calc(100% - 2rem) 100%, 0 100%);
+}
+
+.sticky-fold {
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+html.lenis, html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+body {
+  background-color: var(--color-neo-bg);
+  color: var(--color-brand-dark);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+::selection {
+  background-color: var(--color-neo-pink);
+  color: #fff;
+}
