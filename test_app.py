@@ -1007,6 +1007,48 @@ def main():
         assert victim.scene is None and a.scene is None, "it ends"
         print("ok  walk into a conversation and the two of them turn on you")
 
+        def mock_him(guy):
+            """Get the pair talking, then put him in the middle of it."""
+            # Well clear of them first, or he walks into the conversation
+            # while it is still being set up and the whole thing happens a
+            # beat early.
+            guy.state, guy.floor, guy.y = "rest", floor, floor
+            guy.x = right - 100.0
+            guy._until = time.monotonic() + 999.0
+            park(pair, gap=roamer.CHAT_GAP)
+            step(40)
+            live = a.scene
+            assert live is not None and live.kind == "talk", "a conversation"
+            guy.state, guy.floor, guy.y = "rest", floor, floor
+            guy.vx = guy.vy = 0.0
+            guy.scene = None
+            guy._until = time.monotonic() + 999.0
+            guy._social_at = 0.0
+            guy._social_until = 0.0
+            guy.x = live.mid
+            step(3)
+            assert guy.mocked, "the setup has to have taken"
+            return live
+
+        # he does not take it well, and he is off in the other direction
+        scene = mock_him(victim)
+        mid = scene.mid
+        step(400, lambda: victim.state == "stomp")
+        assert victim.state == "stomp", victim.state
+        assert (victim.x - mid) * victim._leave_way >= 0.0, \
+            "he walks away from them, not back through them"
+        here = victim.x
+        step(20)
+        assert abs(victim.x - here) > abs(roamer.WALK_SPEED * 20 * roamer.STEP), \
+            "and faster than his ordinary walk"
+        assert not victim.sociable(roamer._time()), \
+            "he is not in the mood for anybody"
+        step(400, lambda: victim.state != "stomp")
+        assert victim.state in ("rest", "walk"), victim.state
+        assert victim._cross_until > 0.0, "the anger outlives the stomping"
+        victim.vanish()
+        print("ok  the one they laughed at storms off and stays cross")
+
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9
         b._until = time.monotonic() + 999.0

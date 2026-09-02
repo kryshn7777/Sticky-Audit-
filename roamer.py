@@ -137,6 +137,12 @@ LEAVE_VX = 420.0
 LEAVE_VY = 1150.0
 LEAVE_MAX_S = 5.0       # he is gone by now whatever the screen says
 
+# ------------------------------------------------------- not taking it well
+STOMP_S = 2.5           # how long he keeps it up
+STOMP_SPEED = WALK_SPEED * 1.35
+CROSS_S = 10.0          # ...and how long the face lasts after he stops
+MOCK_COOLDOWN = 150.0
+
 # ------------------------------------------------------------------- the crew
 crew = []
 scenes = []
@@ -258,10 +264,18 @@ def _close(scene, now):
     if scene in scenes:
         scenes.remove(scene)
     for guy in list(scene.cast):
+        was_mocked = (scene.kind == "mock" and bool(scene.cast)
+                      and scene.cast[-1] is guy)
         guy.scene = None
         guy.role = 0
         guy._social_at = now
         if guy.state != "chat":
+            continue
+        if was_mocked:
+            guy._cross_until = now + CROSS_S
+            guy._social_until = now + MOCK_COOLDOWN
+            guy._leave_way = 1.0 if guy.x > scene.mid else -1.0
+            guy._begin("stomp", now)
             continue
         guy._begin("walk", now)
         away = 140.0 if guy.x > scene.mid else -140.0
@@ -520,6 +534,8 @@ class Roamer(tk.Toplevel):
         self.role = 0
         self._watching = None
         self._social_at = 0.0
+        self._social_until = 0.0
+        self._cross_until = 0.0
         self._lift_since = None
 
         self.canvas.bind("<ButtonPress-3>", self._menu)
@@ -937,6 +953,25 @@ class Roamer(tk.Toplevel):
         if stopped or abs(self.x - self._goal) < WALK_SPEED * dt + 0.5:
             self._begin("rest", now)
 
+    def _do_stomp(self, now, dt):
+        """Off, in a straight line, faster than he walks and not looking at
+        anything. He does not get to doze off in a huff either - this falls
+        through to an ordinary rest."""
+        way = self._leave_way
+        self.phase += STOMP_SPEED * dt / STEP_PX * math.pi
+        x1, x2 = self._walls()
+        self.x = _clamp(self.x + way * STOMP_SPEED * dt, x1, x2)
+        self.facing = way * 0.62
+        self.lean = way * 3.2
+        self.face = FACES["cross"]
+        self.look = (0.0, 0.0)
+        self.hands = self.feet = None
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.y = self._floor_y()
+        if now - self.since >= STOMP_S or self.x <= x1 or self.x >= x2:
+            self._stir_at = now
+            self._begin("rest", now)
+
     def _watch_pointer(self):
         try:
             px, py = self.winfo_pointerxy()
@@ -1229,6 +1264,7 @@ class Roamer(tk.Toplevel):
         # loops forever if they never move apart; parting on its own starts
         # again the moment they drift back together.
         return (self.scene is None
+                and now >= self._social_until
                 and now - self._social_at > CHAT_COOLDOWN)
 
     def _leave_scene(self, now):
@@ -1494,6 +1530,12 @@ class Roamer(tk.Toplevel):
             self._blink_at = now + random.uniform(*BLINK_EVERY)
             self._blink_off = now + BLINK_S
             self._blinking = True
+        # The anger outlives the stomping off. Without this he is fine the
+        # instant he stops walking, which reads as a bug rather than as a man
+        # getting over it.
+        if now < self._cross_until:
+            weight = _clamp((self._cross_until - now) / CROSS_S, 0.0, 1.0)
+            self.face = _face_mix(self.face, FACES["cross"], weight)
 
     # ---------------------------------------------------------------- drawing
 
