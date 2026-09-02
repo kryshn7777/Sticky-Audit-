@@ -105,7 +105,8 @@ SWING_MAX = 7.0
 CHAT_R = 130.0          # near enough to strike up a conversation
 CHAT_GAP = 64.0         # ...and how close they end up standing
 CHAT_COOLDOWN = 45.0
-TALK2 = (("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
+WATCH_R = 220.0         # near enough to a conversation to turn round for it
+TALK2 =(("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
          ("say1", 46), ("agree", 24), ("part", 30))
 TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
          ("say1", 42), ("react", 22), ("say2", 44), ("agree", 24),
@@ -243,6 +244,12 @@ def _close(scene, now):
         guy._begin("walk", now)
         away = 140.0 if guy.x > scene.mid else -140.0
         guy._goal = _clamp(guy.x + away, *guy.walk_line)
+    # Whoever was stood watching it is left standing where they left him.
+    for guy in crew:
+        if guy._watching is scene:
+            guy._watching = None
+            if guy.state == "watch":
+                guy._begin("rest", now)
 
 
 def tick():
@@ -270,6 +277,21 @@ def tick():
     for scene in list(scenes):
         scene.i += 1
     _arm(delay)
+
+
+def _scene_near(guy):
+    """The running scene he has walked in on, if any: the nearest one on his
+    own floor that he is not already part of."""
+    best, near = None, WATCH_R
+    for scene in scenes:
+        if not scene.cast or guy in scene.cast:
+            continue
+        if abs(scene.cast[0].y - guy.y) > 30.0:
+            continue
+        gap = abs(guy.x - scene.mid)
+        if gap < near:
+            best, near = scene, gap
+    return best
 
 
 def _cast(now):
@@ -303,6 +325,21 @@ def _cast(now):
                 _open(ready, "talk",
                       TALK3 if len(ready) > 2 else TALK2, now)
             i = j
+
+    # Anybody left over, against whatever is already running. Watchers are
+    # looked at again every tick rather than settled once: one who is shoved
+    # into the middle of a conversation he was watching has to be noticed.
+    for guy in crew:
+        if guy.scene is not None or guy.state not in (
+                "rest", "walk", "sleep", "watch"):
+            continue
+        scene = _scene_near(guy)
+        if scene is None:
+            if guy.state == "watch":
+                guy._watching = None
+                guy._begin("rest", now)
+            continue
+        guy.watch(scene, now)
 
     held = [g for g in crew if g.state == "held"]
     if not held:
@@ -455,6 +492,7 @@ class Roamer(tk.Toplevel):
 
         self.scene = None
         self.role = 0
+        self._watching = None
         self._social_at = 0.0
         self._lift_since = None
 
@@ -1184,6 +1222,35 @@ class Roamer(tk.Toplevel):
         if beat in SPEAKS:
             scene.last_speaker = scene.speaker()
         self._talk_beat(scene, beat, u, now)
+
+    def watch(self, scene, now):
+        if self.state == "watch" and self._watching is scene:
+            return
+        self._watching = scene
+        self._begin("watch", now)
+
+    def _do_watch(self, now, _dt):
+        """Stood at the edge of somebody else's conversation.
+
+        His eyes come off the pointer, which nothing but the look out at the
+        camera does, and for the same reason: there is something on the screen
+        more interesting than the user. Nobody in the scene ever acknowledges
+        him. That is the whole of it.
+        """
+        scene = self._watching
+        if scene is None or scene not in scenes or not scene.cast:
+            self._watching = None
+            self._begin("rest", now)
+            return
+        who = scene.speaker() or scene.last_speaker or scene.cast[0]
+        self.facing = _clamp((who.x - self.x) / 70.0, -1.0, 1.0)
+        self.look = _aim((self.x, self._face_y()),
+                         (who.x, who._face_y()))
+        self.squash, self.roll, self.crouch, self.lean = 1.0, 0.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.phase = 0.0
+        self.y = self._floor_y()
+        self.face = _face_mix(FACES["calm"], FACES["happy"], 0.30)
 
     def _who_to_watch(self, scene, u):
         """Whose head my eyes are on this frame.

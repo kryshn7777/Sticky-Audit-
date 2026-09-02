@@ -940,6 +940,48 @@ def main():
         trio[2].vanish()
         print("ok  three of them talk, and everybody gets a turn")
 
+        # two of them talking, and a third who turns up and hangs back
+        onlooker = roamer.Roamer(app, third, 0.0, floor)
+        pair = [a, b]
+        park(pair + [onlooker])
+        # Out of talking distance of either of them, but inside watching
+        # distance of the pair - so he can never be cast, only an audience.
+        onlooker.x = (pair[0].x + pair[1].x) / 2.0 + 200.0
+        step(8)
+        scene = a.scene
+        assert scene is not None and len(scene.cast) == 2, "the two of them"
+        assert onlooker not in scene.cast, "he is not in it"
+        assert onlooker.state == "watch", onlooker.state
+        assert scene.i > 0, "and the conversation is running normally"
+
+        # His eyes are on whoever is talking rather than on the pointer, which
+        # is the only other thing they are ever on. Not asserted by comparing
+        # one speaker against the other: they stand on the same floor, so the
+        # line to either of them from out here is flat, and _aim normalises
+        # both to the same offset. Aiming at the right head is the check.
+        seen = {}
+
+        def note_eyes():
+            if a.scene is None:
+                return True
+            who = a.scene.speaker()
+            if who is not None:
+                seen[who.role] = (
+                    onlooker.look,
+                    mascot_mod._aim((onlooker.x, onlooker._face_y()),
+                                    (who.x, who._face_y())),
+                    onlooker.facing)
+            return False
+
+        step(600, note_eyes)
+        assert set(seen) == {0, 1}, ("he saw both of them speak", set(seen))
+        for role, (look, want, facing) in seen.items():
+            assert look == want, ("his eyes are on the speaker", role, look, want)
+            assert facing < -0.5, ("and he is turned their way", role, facing)
+        assert onlooker.state == "rest", onlooker.state
+        onlooker.vanish()
+        print("ok  one who turns up late hangs back and watches")
+
         # lift one over the other and the one left behind looks straight out
         b.state, b.y, b.floor, b.facing = "rest", floor, floor, 0.9
         b._until = time.monotonic() + 999.0
