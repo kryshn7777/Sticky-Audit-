@@ -105,8 +105,18 @@ SWING_MAX = 7.0
 CHAT_R = 130.0          # near enough to strike up a conversation
 CHAT_GAP = 64.0         # ...and how close they end up standing
 CHAT_COOLDOWN = 45.0
-CHAT = (("approach", 34), ("greet", 20), ("say_a", 52), ("react_b", 26),
-        ("say_b", 46), ("agree", 24), ("part", 30))
+TALK2 = (("approach", 34), ("greet", 20), ("say0", 52), ("react", 26),
+         ("say1", 46), ("agree", 24), ("part", 30))
+
+# Which role is talking, by beat name. Everything else about a scene - who
+# looks at whom, who laughs, who is left standing - falls out of this and the
+# cast order, which is why the three scenes differ only by data.
+#
+# say_a and say_b became say0 and say1 because the speaker is an index now
+# rather than a bool. react_b became react because the rule that made it work
+# for two - the one who just spoke thinks, everybody else laughs - was already
+# the rule for any number of them.
+SPEAKS = {"say0": 0, "say1": 1, "say2": 2}
 
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
@@ -122,6 +132,7 @@ LEAVE_MAX_S = 5.0       # he is gone by now whatever the screen says
 
 # ------------------------------------------------------------------- the crew
 crew = []
+scenes = []
 _job = None
 _root = None
 STEP = None             # tests pin the step so the physics repeats exactly
@@ -162,6 +173,75 @@ def _cancel():
     _job = None
 
 
+class _Scene:
+    """One thing happening between several of them.
+
+    The cast is ordered left to right at the moment it opens and a roamer's
+    role is his index in it, so `say0` means whoever was standing furthest
+    left. `mid` is frozen at that moment too: the standing positions are
+    solved against it every frame, and against a live centroid the target
+    would chase the people walking towards it.
+
+    The beat index lives here rather than on each of them. It is advanced
+    once per crew tick, after everybody has been drawn - with an index each,
+    whoever stepped first would be a beat ahead of whoever stepped second.
+    """
+
+    __slots__ = ("kind", "table", "cast", "i", "mid", "last_speaker")
+
+    def __init__(self, kind, table, cast):
+        self.kind = kind
+        self.table = table
+        self.cast = list(cast)
+        self.i = 0
+        self.mid = sum(g.x for g in self.cast) / float(len(self.cast))
+        self.last_speaker = None
+
+    def speaker(self):
+        """Whose turn it is, or None on a beat where nobody is talking."""
+        beat, _ = _beat(self.table, self.i)
+        role = SPEAKS.get(beat)
+        if role is None or role >= len(self.cast):
+            return None
+        return self.cast[role]
+
+    def stand_x(self, guy):
+        """Where he ends up standing: a row, CHAT_GAP apart, about `mid`."""
+        i = self.cast.index(guy)
+        return self.mid + (i - (len(self.cast) - 1) / 2.0) * CHAT_GAP
+
+
+def _open(group, kind, table, now):
+    scene = _Scene(kind, table, group)
+    scenes.append(scene)
+    for i, guy in enumerate(group):
+        guy.scene = scene
+        guy.role = i
+        guy._stir_at = now
+        guy._begin("chat", now)
+    return scene
+
+
+def _close(scene, now):
+    """Everybody out, and away in different directions.
+
+    Sent off from here rather than each finding out for himself: the next one
+    to step would see his cast already walking and take it for having been
+    abandoned mid-sentence.
+    """
+    if scene in scenes:
+        scenes.remove(scene)
+    for guy in list(scene.cast):
+        guy.scene = None
+        guy.role = 0
+        guy._social_at = now
+        if guy.state != "chat":
+            continue
+        guy._begin("walk", now)
+        away = 140.0 if guy.x > scene.mid else -140.0
+        guy._goal = _clamp(guy.x + away, *guy.walk_line)
+
+
 def tick():
     """One step for everybody. Safe to call directly, which is how the tests
     drive it."""
@@ -175,41 +255,43 @@ def tick():
     else:
         _stamp = (time.monotonic() if _stamp is None else _stamp) + STEP
         now = _stamp
-    _pair_up(now)
+    _cast(now)
     delay = SLEEP_MS
     for guy in list(crew):
         try:
             delay = min(delay, guy.step(now))
         except tk.TclError:
             guy.vanish()
+    # After the loop, not before it: that keeps the first tick of a scene
+    # reading beat zero, which is what the old per-roamer counter did.
+    for scene in list(scenes):
+        scene.i += 1
     _arm(delay)
 
 
-def _pair_up(now):
-    """Who is standing next to whom, and who is being dangled over whom.
+def _cast(now):
+    """Who is in a scene with whom, and who is being dangled over whom.
 
-    Decided here, once, for the whole crew: left to right, claimed as we go.
-    Left to each of them separately, A takes up with B while B is already
+    Decided here, once, for the whole crew, for the same reason pairing was:
+    left to each of them separately, A takes up with B while B is already
     taking up with C and the whole thing knots itself.
     """
     free = sorted((g for g in crew if g.state in ("rest", "walk", "sleep")),
                   key=lambda g: g.x)
-    taken = set()
-    for i, a in enumerate(free):
-        if id(a) in taken:
-            continue
-        for b in free[i + 1:]:
-            if id(b) in taken or abs(b.x - a.x) > CHAT_R:
-                continue
-            if abs(b.y - a.y) > 30.0:
-                continue                        # not standing on the same floor
-            if not (a.sociable(now) and b.sociable(now)):
-                continue
-            taken.add(id(a))
-            taken.add(id(b))
-            a.start_chat(b, now, first=True)
-            b.start_chat(a, now, first=False)
-            break
+    i = 0
+    while i < len(free):
+        # A chain of them, each within talking distance of the last one and
+        # standing on the same floor.
+        group = [free[i]]
+        j = i + 1
+        while (j < len(free) and free[j].x - group[-1].x <= CHAT_R
+               and abs(free[j].y - group[-1].y) <= 30.0):
+            group.append(free[j])
+            j += 1
+        ready = [g for g in group if g.sociable(now)][:3]
+        if len(ready) >= 2:
+            _open(ready, "talk", TALK2, now)
+        i = j
 
     held = [g for g in crew if g.state == "held"]
     if not held:
@@ -232,6 +314,7 @@ def shutdown():
     for guy in list(crew):
         guy.go_home()
     del crew[:]
+    del scenes[:]
 
 
 send_all_home = shutdown
@@ -356,9 +439,8 @@ class Roamer(tk.Toplevel):
         self._launched = False
         self._leave_way = 1.0
 
-        self.partner = None
-        self._chat_i = 0
-        self._chat_first = True
+        self.scene = None
+        self.role = 0
         self._social_at = 0.0
         self._lift_since = None
 
@@ -420,7 +502,7 @@ class Roamer(tk.Toplevel):
         towards the nearer edge, a wave on the way past, and that is the last
         anybody sees of him."""
         now = _time()
-        self._release_partner(now)
+        self._leave_scene(now)
         self.grip_note = None
         middle = (self.walk_line[0] + self.walk_line[1]) / 2.0
         self._leave_way = 1.0 if self.x >= middle else -1.0
@@ -432,7 +514,7 @@ class Roamer(tk.Toplevel):
         """He is in somebody's hand. Legal from any state at all - including
         halfway through a conversation, which is the funniest time for it."""
         now = _time()
-        self._release_partner(now)
+        self._leave_scene(now)
         self._mark = None
         self.grip_note = None
         self.state = "held"
@@ -508,7 +590,7 @@ class Roamer(tk.Toplevel):
         self.vanish()
 
     def vanish(self):
-        self._release_partner(_time())
+        self._leave_scene(_time())
         if self in crew:
             crew.remove(self)
         try:
@@ -1044,80 +1126,97 @@ class Roamer(tk.Toplevel):
 
     # -- company -------------------------------------------------------------
 
+    @property
+    def partner(self):
+        """The other one, when there are exactly two of us.
+
+        A conversation between two is still the common case, and reads far
+        better than indexing a cast of two.
+        """
+        scene = self.scene
+        if scene is None or len(scene.cast) != 2:
+            return None
+        return scene.cast[1 - self.role]
+
     def sociable(self, now):
         # Both a cooldown and having actually parted. A cooldown on its own
         # loops forever if they never move apart; parting on its own starts
         # again the moment they drift back together.
-        return (self.partner is None
+        return (self.scene is None
                 and now - self._social_at > CHAT_COOLDOWN)
 
-    def start_chat(self, other, now, first):
-        self.partner = other
-        self._chat_first = first
-        self._chat_i = 0
-        self._stir_at = now
-        self._begin("chat", now)
-
-    def _release_partner(self, now):
-        other, self.partner = self.partner, None
-        if other is None or other.partner is not self:
+    def _leave_scene(self, now):
+        """Drop out of whatever I was in, and decide what is left of it."""
+        scene, self.scene = self.scene, None
+        self.role = 0
+        if scene is None:
             return
-        other.partner = None
-        other._social_at = now
-        if other.state == "chat":
-            other._begin("rest", now)
+        self._social_at = now
+        if self in scene.cast:
+            scene.cast.remove(self)
+        _close(scene, now)
 
     def _do_chat(self, now, _dt):
-        other = self.partner
-        if other is None or other not in crew or other.state != "chat":
+        scene = self.scene
+        if scene is None or scene not in scenes or self not in scene.cast:
             self._social_at = now
-            self.partner = None
+            self.scene = None
             self._begin("rest", now)
             return
-        beat, u = _beat(CHAT, self._chat_i)
-        self._chat_i += 1
+        beat, u = _beat(scene.table, scene.i)
         if beat == "done":
-            self._social_at = now
-            self.partner = None
-            self._begin("walk", now)
-            # They leave in opposite directions, so they are not still standing
-            # inside talking distance when the cooldown runs out. Both are sent
-            # off here rather than each finding out for himself: the other one
-            # steps a tick later, sees his partner already walking and would
-            # take that for having been abandoned mid-sentence.
-            away = 140.0 if self.x > other.x else -140.0
-            self._goal = _clamp(self.x + away, *self.walk_line)
-            if other.state == "chat" and other.partner is self:
-                other.partner = None
-                other._social_at = now
-                other._begin("walk", now)
-                other._goal = _clamp(other.x - away, *other.walk_line)
+            _close(scene, now)
             return
+        if beat in SPEAKS:
+            scene.last_speaker = scene.speaker()
+        self._talk_beat(scene, beat, u, now)
 
-        # Attention, every frame and whatever the beat is doing: they square up
-        # to each other and their eyes follow. Two lines, and they are what
-        # makes this read as a conversation instead of two toys twitching.
-        self.facing = _clamp((other.x - self.x) / 70.0, -1.0, 1.0)
+    def _who_to_watch(self, scene, u):
+        """Whose head my eyes are on this frame.
+
+        Whoever is talking; between speeches, whoever spoke last; and before
+        anyone has, simply the nearest of them. A speaker cannot watch
+        himself, so he works the room instead - one listener for the first
+        half of his beat and the other for the second.
+        """
+        who = scene.speaker() or scene.last_speaker
+        others = [g for g in scene.cast if g is not self]
+        if not others:
+            return None
+        if who is None or who is self:
+            if who is None:
+                return min(others, key=lambda g: abs(g.x - self.x))
+            return others[0] if (u < 0.5 or len(others) < 2) else others[1]
+        return who
+
+    def _talk_beat(self, scene, beat, u, now):
+        who = self._who_to_watch(scene, u)
+        if who is None:
+            return
+        # Attention, every frame and whatever the beat is doing: they square
+        # up to whoever is talking and their eyes follow. Two lines, and they
+        # are what makes this read as a conversation instead of two toys
+        # twitching.
+        self.facing = _clamp((who.x - self.x) / 70.0, -1.0, 1.0)
         self.look = _aim((self.x, self._face_y()),
-                         (other.x, other._face_y()))
+                         (who.x, who._face_y()))
         self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
         self.hands = self.feet = None
         self.lean, self.phase = 0.0, 0.0
         self.y = self._floor_y()
-        side = 1.0 if other.x > self.x else -1.0
-        mine = (beat == "say_a") == self._chat_first
-        speaking = beat in ("say_a", "say_b") and mine
-        listening = beat in ("say_a", "say_b") and not mine
+        side = 1.0 if who.x > self.x else -1.0
+        speaking = scene.speaker() is self
+        listening = scene.speaker() is not None and not speaking
 
         if beat == "approach":
-            want = other.x - side * CHAT_GAP
+            want = scene.stand_x(self)
             self.x = _mix(self.x, want, 0.10)
             self.phase = now * 6.0 if abs(self.x - want) > 2.0 else 0.0
             self.face = FACES["calm"]
         elif beat == "greet":
-            if self._chat_first:
+            if self.role == 0:
                 self.hands = self._one_hand(side, 22.0, -16.0)
-                if self._chat_i == 2:
+                if scene.i == 35:
                     self._say("!")
             self.face = _face_mix(FACES["calm"], FACES["happy"], _smooth(u))
         elif speaking:
@@ -1132,8 +1231,8 @@ class Roamer(tk.Toplevel):
         elif listening:
             self.y = self._floor_y() + math.sin(u * TAU * 1.6) * 2.4
             self.face = _face_mix(FACES["calm"], FACES["happy"], 0.4)
-        elif beat == "react_b":
-            if self._chat_first:
+        elif beat == "react":
+            if scene.last_speaker is self:
                 self.face = _face_mix(FACES["calm"], FACES["think"], 0.7)
             else:
                 self.face = FACES["laugh"]
@@ -1180,7 +1279,7 @@ class Roamer(tk.Toplevel):
             return
         if now - self._lift_since < WTF_HOLD:
             return
-        self._release_partner(now)
+        self._leave_scene(now)
         self._begin("wtf", now)
         self._lift_since = None
 
