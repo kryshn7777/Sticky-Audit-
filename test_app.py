@@ -706,6 +706,15 @@ def main():
     up = mascot_mod._reach((0.0, 0.0), (12.0, 0.0), 8.5, 9.0, bend=-1.0)[0]
     assert down[1] * up[1] < 0, "bend has to put the elbow on either side"
 
+    # An angry face, and not the same angry as the look out at the camera.
+    cross = mascot_mod.FACES["cross"]
+    wtf = mascot_mod.FACES["wtf"]
+    assert cross.brow < 0 and cross.tilt < 0, "brows down and in, or it is not anger"
+    assert cross.curve < 0, "and a frown, not a smile"
+    assert cross.eye < 1.0 < wtf.eye, \
+        "cross narrows his eyes where wtf makes saucers - that is the difference"
+    print("ok  he has a face for being laughed at")
+
     # The one-armed call the colour flip makes is left alone, stretch and all:
     # he never steps close enough to that crease for a real elbow to reach it,
     # and the flip is finished work. Routing it through the solver would leave
