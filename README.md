@@ -330,6 +330,67 @@ come off a conversation at the same moment - one of them is held back, some of
 the time - and that is the whole supply of odd ones out. Everybody free at once
 is a three-way; somebody still cooling off is a pair with an audience.
 
+**Excusing yourself.** About a third of three-way conversations (`BOW_ODDS`)
+are one of them leaving early. He waits for a gap rather than cutting anybody
+off - it fires on the frame the second speaker begins, and never on the man
+about to speak, because talking over somebody is what the mocking is for and
+this is meant to be the opposite of it. He waves, says bye, turns and goes,
+and the two left switch to a shorter table and take it to a close. Their roles
+are re-indexed as he goes, or the line the table asks the second of them for
+lands on nobody and they stand there in silence. Where they are standing is
+deliberately not recalculated: they have not moved, and the only beat that
+solves a position against the middle of a conversation is the walking-in one,
+which the farewell does not have.
+
+**Football.** A quarter of the time (`FOOTY_ODDS`) what they have met up to do
+is kick a ball about. There are no sides, no goals and no score. Whoever is
+nearest the ball is whoever chases it, worked out from distance every frame
+rather than appointed at the start, so possession turns over the instant
+somebody else is closer - and two of them converging on a loose ball is the
+whole game. He boots it at one of the others rather than at nowhere, and only
+while it is coming down: allowed to kick it on the way up he re-boots the same
+ball four frames running and it leaves the screen. The three odds are one roll
+cut three ways rather than a roll each, because chaining independent odds makes
+whatever is last on the list far rarer than its number reads.
+
+**Wood, and a hut.** A fifth of the time (`BUILD_ODDS`), if there are three of
+them and nothing built yet, they agree on a hut instead. Each trots off to the
+nearer edge of the screen and keeps going until he is out of it - he is not
+hidden and nothing is switched off, he has simply walked past the end of his
+own window, which is the size of the screen and does not follow him. A moment
+later he is back with a plank held out in front of him, and when the last of
+the three is home the hut goes up between them and they file in through the
+door. `FETCH_SPEED` is the knob if the errand drags on a very wide screen, and
+`FETCH_MAX_S` is the give-up: a man who has been out there a minute has had
+something go wrong with the floor and comes to his senses rather than standing
+off the edge for ever. The scene stays on him for the whole errand, so a hand
+closing on any one of the three still tears the build down the way it breaks up
+a conversation - and whoever comes home with the wood to find nobody there puts
+it down and goes back to what he was doing. Indoors he is a withdrawn window
+with a time on it, ticking at the dozing rate and drawing nothing.
+
+**Knocking it down.** Right-click the hut and it is gone. No menu: a roamer has
+one because *Send him home* and *Ask him to leave* are two different things and
+one of them is final, and there is only ever one thing to do to a hut.
+Everybody who was inside comes out where it stood, and so does anybody within
+`WATCH_R` on the same floor who was near enough to have watched it happen -
+which is the difference between a hut falling over and a hut being kicked in.
+They run back and forth for `PANIC_S` rather than off: away is a stomp, and he
+does that when he has been laughed at. The face wears off over `PANIC_FACE_S`
+after the running stops, for the same reason the anger does - somebody
+perfectly calm the instant he stops running reads as a bug.
+
+**The yard.** The ball and the hut share one window between them, keyed
+transparent and covering the whole screen, exactly like a roamer's and for the
+same two reasons: a window that follows a moving prop judders, and the keyed
+colour is click-through, so the right-click that takes the hut down is the only
+click that window ever takes. Nothing in `yard.py` knows what a roamer is - the
+one thing it has to say, that somebody has just knocked the hut down, it says
+through a callback the crew registers on the way past, which keeps the import
+one way and the physics checkable without a display. One yard, on one screen:
+start a kickabout on a second monitor and the ball turns up on the first. A
+yard per screen is the fix, and it is not worth it until somebody notices.
+
 **Getting him back.** Right-click him and choose *Send him home*, or use
 *Send him home* on that note's own right-click menu. Dropping him on his own
 note does not do it - his own note is just another note to hold on to, and
@@ -439,6 +500,7 @@ replaced. `test_app.py` throws him and asserts the window never moved.
 | `note.py` | the note window — paper, drag, edit, autosize, checkboxes, undo toast |
 | `mascot.py` | the box man, his poses, the colour flip, the pointer tracker, the speech bubble |
 | `roamer.py` | the same box man off the note: his own window, the physics, and what he does out there |
+| `yard.py` | the ball and the hut they build: one shared overlay, and no idea what a roamer is |
 | `board.py` | overview, Trash, settings |
 | `store.py` | atomic JSON persistence and the palette |
 | `winkit.py` | the Windows calls tkinter does not expose |

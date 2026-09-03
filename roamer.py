@@ -25,6 +25,14 @@ What he does:
   * one who gets into the middle of it, by sidling or by being dropped there,
     is pointed at and laughed at, and stalks off with a face on him that takes
     a while to wear off,
+  * one of three in a conversation sometimes has somewhere else to be, waves,
+    says bye and goes, and the two left finish it off without him,
+  * some of the time what they have met up to do is kick a ball about, and
+    whoever is nearest it is whoever chases it,
+  * three of them with nothing built yet walk off the sides of the screen,
+    come back carrying planks, put up a hut and go inside it,
+  * right-clicking that hut takes it down, which brings everybody in it and
+    everybody near it out screaming,
   * and lifting one of them over the others gets you a look from all of them.
 
 Cost
@@ -39,6 +47,10 @@ dozing is 500ms, and only actually moving costs a frame every 16ms. A crew
 ticker is also what lets two of them find each other: who is standing next to
 whom is decided once per tick over the whole list, rather than each of them
 hunting for company on his own.
+
+The ball and the hut live in `yard.py`, which owns no timer either: `tick`
+steps and paints it as part of the frame it is already running, and the last
+of them going home takes the yard's window with it.
 """
 
 import math
