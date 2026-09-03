@@ -193,6 +193,13 @@ FETCH_MAX_S = 60.0               # the errand has gone wrong: come to your sense
 PLANK_W, PLANK_H = 44.0, 7.0
 INSIDE_S = (14.0, 26.0)
 
+# -------------------------------------------------------------- it came down
+PANIC_S = 3.2           # how long the running lasts
+PANIC_FACE_S = 2.5      # ...and how long it takes his face to come back
+PANIC_TURN = 0.45       # he changes his mind about which way this often
+PANIC_SPEED = WALK_SPEED * 2.6
+HUT_SPILL = 34.0        # how far apart they come out
+
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
 WTF_HOLD = 0.22         # held this long, so a flick past does not trip it
@@ -398,6 +405,39 @@ def _advance(scene, now):
     # _close leaves anybody who is not mid-conversation alone, so they keep
     # walking to the door rather than being sent off in three directions.
     _close(scene, now)
+
+
+def _hut_down(x, floor):
+    """Somebody has just knocked it down.
+
+    Registered on the yard as a callback rather than called out of it, so the
+    yard never has to know what a roamer is. Everybody who was inside comes
+    out where it stood - and so does anybody near enough to have watched it
+    happen, which is the difference between a hut falling over and a hut
+    being kicked in.
+    """
+    now = _time()
+    for guy in list(crew):
+        if guy.state == "inside":
+            try:
+                guy.deiconify()
+            except tk.TclError:
+                continue
+            guy.x = _clamp(x + random.uniform(-HUT_SPILL, HUT_SPILL),
+                           *guy.walk_line)
+            guy.y = floor
+            guy._begin("panic", now)
+        elif (guy.floor is not None and abs(guy.floor - floor) < 4.0
+              and abs(guy.x - x) < WATCH_R
+              and guy.state in ("rest", "walk", "sleep", "watch")):
+            guy._leave_scene(now)
+            guy._watching = None
+            guy._begin("panic", now)
+    _cancel()
+    _arm(TICK_MS)
+
+
+yard.on_knock = _hut_down
 
 
 def _close(scene, now):
@@ -993,6 +1033,12 @@ class Roamer(tk.Toplevel):
                 self.withdraw()
             except tk.TclError:
                 pass
+        elif state == "panic":
+            self._until = now + PANIC_S
+            self._panic_until = now + PANIC_S + PANIC_FACE_S
+            self._leave_way = random.choice((-1.0, 1.0))
+            self._turn_at = now + PANIC_TURN
+            self.hands = self.feet = None
         elif state == "walk":
             self._stir_at = now
             x1, x2 = self.walk_line
@@ -1366,6 +1412,38 @@ class Roamer(tk.Toplevel):
         self._stir_at = now
         self._social_at = now
         self._begin("rest", now)
+
+    def _do_panic(self, now, dt):
+        """Out of the wreck, and running.
+
+        Back and forth rather than away. Away is a stomp, and he already does
+        that when he has been laughed at; this is somebody with nowhere in
+        particular to be and no intention of standing still while he works
+        out where.
+        """
+        if now >= self._turn_at:
+            self._leave_way = -self._leave_way
+            self._turn_at = now + PANIC_TURN
+        way = self._leave_way
+        x1, x2 = self._walls()
+        self.x += way * PANIC_SPEED * dt
+        if self.x <= x1 or self.x >= x2:
+            self.x = _clamp(self.x, x1, x2)
+            self._leave_way = -way
+            self._turn_at = now + PANIC_TURN
+        self.phase += PANIC_SPEED * dt / STEP_PX * math.pi
+        self.facing, self.lean = way * 0.5, way * 3.4
+        self.look = (0.0, 0.0)
+        self.face = FACES["panic"]
+        fy = self._face_y()
+        self.hands = ((self.x - 26.0, fy - 12.0), (self.x + 26.0, fy - 12.0))
+        self.feet = None
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.y = self._floor_y()
+        self._say("!" if int((now - self.since) / 0.18) % 2 else "!!")
+        if now - self.since >= PANIC_S:
+            self._stir_at = now
+            self._begin("rest", now)
 
     def _watch_pointer(self):
         try:
@@ -2067,6 +2145,13 @@ class Roamer(tk.Toplevel):
         if now < self._cross_until:
             weight = _clamp((self._cross_until - now) / CROSS_S, 0.0, 1.0)
             self.face = _face_mix(self.face, FACES["cross"], weight)
+        # ...and so does the fright, for the same reason: a man who is
+        # perfectly calm the instant he stops running reads as a bug rather
+        # than as somebody getting his breath back.
+        if now < self._panic_until:
+            weight = _clamp((self._panic_until - now) / PANIC_FACE_S,
+                            0.0, 1.0)
+            self.face = _face_mix(self.face, FACES["panic"], weight * 0.6)
 
     # ---------------------------------------------------------------- drawing
 

@@ -1332,11 +1332,34 @@ def main():
         assert not roamer.scenes, "and the build is over"
         print("ok  they fetch wood off the screen and build a hut to go into")
 
+        # ...and right-clicking it brings them out screaming
+        where = yard.hut().x
+        yard.knock_down()
+        assert yard.hut() is None, "right-clicking it takes it down"
+        pump(app.root)
+        assert all(one.winfo_viewable() for one in crowd), \
+            "and everybody in it comes straight back out"
+        assert all(one.state == "panic" for one in crowd), \
+            [one.state for one in crowd]
+        assert all(abs(one.x - where) < roamer.WATCH_R for one in crowd), \
+            "out where it stood, not where they went in from"
+        spots = [one.x for one in crowd]
+        step(30)
+        assert any(abs(one.x - was) > 1.0 for one, was in zip(crowd, spots)), \
+            "they have to actually run"
+        step(60 * 10, lambda: all(one.state == "rest" for one in crowd))
+        assert all(one.state == "rest" for one in crowd), \
+            ("and settle again", [one.state for one in crowd])
+        roamer.BUILD_ODDS, roamer.FOOTY_ODDS = was_build, was_footy
+        print("ok  knock the hut down and they come out screaming")
+
         # --- and none of it is left running ---------------------------------
         roamer.send_all_home()
         pump(app.root)
         assert not roamer.crew, "everybody goes back on his note"
         assert roamer._job is None, "an empty crew must not own a timer"
+        assert yard.hut() is None and yard.ball() is None, \
+            "an empty crew must not leave a yard behind either"
         assert window.mascot.visible() and second.mascot.visible()
         assert sheet(window) == base, "and the sheet is where it always was"
 
