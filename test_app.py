@@ -1305,6 +1305,33 @@ def main():
         assert yard.ball() is None, "and the ball goes with them"
         print("ok  they kick a ball about, and take it with them")
 
+        # three of them fetch wood off the sides of the screen and build a hut
+        roamer.BUILD_ODDS, roamer.FOOTY_ODDS = 1.0, 0.0
+        # Near the left edge, so the errand is a few seconds rather than the
+        # twenty a walk from the middle of a wide screen would take.
+        settle(crowd, at=left + 140.0)
+        step(3)
+        scene = crowd[0].scene
+        assert scene is not None and scene.kind == "build", scene
+        step(60 * 5, lambda: all(one.state == "fetch" for one in crowd))
+        assert all(one.state == "fetch" for one in crowd), \
+            [one.state for one in crowd]
+        went = step(60 * 30, lambda: all(one.x < left - 40.0 for one in crowd))
+        assert went is not None, \
+            "they have to actually leave the screen for it"
+        back = step(60 * 30, lambda: yard.hut() is not None)
+        assert back is not None and yard.hut() is not None, \
+            "three planks home and there has to be a hut"
+        assert all(one.carry is False for one in crowd), "the wood is used up"
+        step(60 * 30, lambda: all(one.state == "inside" for one in crowd))
+        assert all(one.state == "inside" for one in crowd), \
+            [one.state for one in crowd]
+        pump(app.root)
+        assert not any(one.winfo_viewable() for one in crowd), \
+            "indoors is indoors"
+        assert not roamer.scenes, "and the build is over"
+        print("ok  they fetch wood off the screen and build a hut to go into")
+
         # --- and none of it is left running ---------------------------------
         roamer.send_all_home()
         pump(app.root)

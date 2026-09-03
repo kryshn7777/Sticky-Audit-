@@ -181,8 +181,17 @@ KICK_VX, KICK_VY = 300.0, 620.0
 CHASE_SPEED = WALK_SPEED * 2.4   # nobody walks at a loose ball
 
 # ---------------------------------------------------------------------- a hut
+# The agreement is a scene; the errand is not. He keeps his scene through the
+# whole of it, so a hand closing on any one of the three still tears the
+# build down the way it tears down a conversation.
 BUILD = (("agree", 30), ("send", 6))
 BUILD_ODDS = 0.20
+FETCH_SPEED = WALK_SPEED * 2.2   # eager, and it is a long way to the edge
+FETCH_OFF = 130.0                # how far past the edge before he is out of it
+FETCH_GONE_S = 1.2               # ...and how long he is out there for
+FETCH_MAX_S = 60.0               # the errand has gone wrong: come to your senses
+PLANK_W, PLANK_H = 44.0, 7.0
+INSIDE_S = (14.0, 26.0)
 
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
@@ -371,6 +380,24 @@ def _advance(scene, now):
             going = [g for g in scene.cast if g is not speaker]
             if going:
                 _bow_out(scene, random.choice(going), now)
+    if scene.kind != "build":
+        return
+    if any(g not in crew or g.state not in ("chat", "fetch")
+           for g in scene.cast):
+        _close(scene, now)              # somebody was lifted out of it
+        return
+    if not scene.cast or any(g.state != "fetch" or g._fetch != "home"
+                             for g in scene.cast):
+        return                          # still nodding, or still out there
+    if yard.raise_hut(scene.mid, scene.cast[0].floor) is None:
+        _close(scene, now)
+        return
+    for guy in list(scene.cast):
+        guy.carry = False
+        guy._begin("enter", now)
+    # _close leaves anybody who is not mid-conversation alone, so they keep
+    # walking to the door rather than being sent off in three directions.
+    _close(scene, now)
 
 
 def _close(scene, now):
@@ -956,6 +983,16 @@ class Roamer(tk.Toplevel):
         elif state == "bye":
             self._until = now + BYE_S
             self.hands = self.feet = None
+        elif state == "enter":
+            self.hands = self.feet = None
+            self._mark = None
+        elif state == "inside":
+            self._until = now + random.uniform(*INSIDE_S)
+            self.hands = self.feet = None
+            try:
+                self.withdraw()
+            except tk.TclError:
+                pass
         elif state == "walk":
             self._stir_at = now
             x1, x2 = self.walk_line
@@ -971,12 +1008,17 @@ class Roamer(tk.Toplevel):
             self.hands = self.feet = None
 
     def rate(self):
-        return {"grip": GRIP_MS, "rest": REST_MS,
-                "sleep": SLEEP_MS}.get(self.state, TICK_MS)
+        return {"grip": GRIP_MS, "rest": REST_MS, "sleep": SLEEP_MS,
+                "inside": SLEEP_MS}.get(self.state, TICK_MS)
 
     def step(self, now):
         dt = STEP if STEP is not None else min(now - self._t, MAX_STEP)
         self._t = now
+        if self.state == "inside":
+            # Nothing to place and nothing to draw: he is a withdrawn window
+            # with a time on it.
+            self._do_inside(now, dt)
+            return self.rate()
         if self.floor is None or self.state in ("fall", "walk"):
             self._find_floor(now, force=self.floor is None)
         getattr(self, "_do_" + self.state)(now, dt)
@@ -1212,6 +1254,118 @@ class Roamer(tk.Toplevel):
             return
         self._begin("walk", now)
         self._goal = _clamp(self.x + self._leave_way * 200.0, *self.walk_line)
+
+    def _do_fetch(self, now, dt):
+        """Off the side of the screen for wood, and back with a plank.
+
+        Three legs, on `_fetch`, and the middle one is the joke: he is not
+        hidden and nothing has been switched off. He has simply walked far
+        enough past the edge that his own window - which is exactly the size
+        of the screen and does not follow him - has nowhere left to draw him.
+        """
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.feet = None
+        self.y = self._floor_y()
+        self.face = FACES["calm"]
+        self.look = (0.0, 0.0)
+        x1, x2 = self._walls()
+        if now - self.since > FETCH_MAX_S:
+            # Wedged in a corner, or the floor moved out from under the whole
+            # errand. Standing out there for good is the one outcome worse
+            # than never having gone.
+            self.carry = False
+            self.x = _clamp(self.x, x1, x2)
+            self._begin("rest", now)
+            return
+
+        if self._fetch == "out":
+            way = self._fetch_way
+            self.x += way * FETCH_SPEED * dt
+            self.phase += FETCH_SPEED * dt / STEP_PX * math.pi
+            self.facing, self.lean = way * 0.62, way * 3.0
+            self.hands = None
+            if self.x < x1 - FETCH_OFF or self.x > x2 + FETCH_OFF:
+                self._fetch = "back"
+                self._until = now + FETCH_GONE_S
+            return
+
+        if self._fetch == "back":
+            if now < self._until:
+                return                  # out of sight, finding a plank
+            self.carry = True
+            way = 1.0 if self._site_x > self.x else -1.0
+            self.x += way * FETCH_SPEED * dt
+            self.phase += FETCH_SPEED * dt / STEP_PX * math.pi
+            self.facing, self.lean = way * 0.62, way * 3.0
+            self._carry_hands()
+            if abs(self.x - self._site_x) < FETCH_SPEED * dt + 0.5:
+                self.x = self._site_x
+                self._fetch = "home"
+            return
+
+        # home: stood at the site with the wood, waiting for the other two.
+        self.phase, self.lean = 0.0, 0.0
+        self.facing = _mix(self.facing, 0.0, 0.2)
+        self._carry_hands()
+        self._watch_pointer()
+        if self.scene is None or self.scene not in scenes:
+            # He has come back with the wood to find nobody there, which is
+            # what a hand closing on one of the other two looks like from out
+            # at the edge of the screen.
+            self.carry = False
+            self._begin("rest", now)
+
+    def _carry_hands(self):
+        """Both hands out in front, a plank's width apart. `paint` draws the
+        plank across them, after the figure, so it is in front of him."""
+        fy = self._face_y() + HEAD * 0.35
+        self.hands = ((self.x - PLANK_W / 2.0, fy),
+                      (self.x + PLANK_W / 2.0, fy))
+
+    def _do_enter(self, now, dt):
+        """To the door, and in.
+
+        The hut is asked for every frame rather than remembered from the
+        moment it went up: it can be knocked down while he is still walking
+        to it, and then there is nothing to walk into.
+        """
+        hut = yard.hut()
+        if hut is None:
+            self._begin("rest", now)
+            return
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.y = self._floor_y()
+        self.face = _face_mix(FACES["calm"], FACES["happy"], 0.5)
+        way = 1.0 if hut.x > self.x else -1.0
+        self.x += way * WALK_SPEED * dt
+        self.phase += WALK_SPEED * dt / STEP_PX * math.pi
+        self.facing, self.lean = way * 0.62, way * 2.4
+        self.look = _aim((self.x, self._face_y()),
+                         (hut.x, hut.floor - yard.DOOR_H))
+        if abs(self.x - hut.x) < WALK_SPEED * dt + 0.5:
+            self._begin("inside", now)
+
+    def _do_inside(self, now, _dt):
+        """Indoors: a withdrawn window and a time to come out at.
+
+        `step` returns before `_place` and `paint` for this one state, so a
+        man in a hut costs one comparison a tick and no drawing at all. The
+        check on the hut still being there is belt and braces - `_hut_down`
+        empties it the moment it goes - and catches it disappearing any other
+        way.
+        """
+        if now < self._until and yard.hut() is not None:
+            return
+        try:
+            self.deiconify()
+        except tk.TclError:
+            pass
+        # Not all three out of the same doorway at the same pixel.
+        self.x = _clamp(self.x + random.uniform(-34.0, 34.0), *self.walk_line)
+        self._stir_at = now
+        self._social_at = now
+        self._begin("rest", now)
 
     def _watch_pointer(self):
         try:
@@ -1567,6 +1721,8 @@ class Roamer(tk.Toplevel):
             self._mock_beat(scene, beat, u, now)
         elif scene.kind == "footy":
             self._footy_beat(scene, u, now, dt)
+        elif scene.kind == "build":
+            self._build_beat(scene, beat, u, now)
         else:
             self._talk_beat(scene, beat, u, now)
 
@@ -1868,6 +2024,32 @@ class Roamer(tk.Toplevel):
         self.feet = ((self.x - 6.0, self.y),
                      (self.x + math.copysign(18.0, ball.vx), self.y - 10.0))
 
+    def _build_beat(self, scene, beat, u, now):
+        """They agree on it, and then they scatter for the wood."""
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.lean, self.phase = 0.0, 0.0
+        self.y = self._floor_y()
+        if beat == "agree":
+            who = self._who_to_watch(scene, u)
+            if who is not None:
+                self.facing = _clamp((who.x - self.x) / 70.0, -1.0, 1.0)
+                self.look = _aim((self.x, self._face_y()),
+                                 (who.x, who._face_y()))
+            self.face = FACES["happy"]
+            self.y = self._floor_y() + math.sin(u * TAU * 2.0) * 2.6
+            if self.role == 0 and scene.i == 6:
+                self._say("!")
+            return
+        # send: off to the nearer edge, and the scene holds him until the
+        # wood is home again.
+        x1, x2 = self._walls()
+        self._fetch = "out"
+        self._fetch_way = -1.0 if (self.x - x1) < (x2 - self.x) else 1.0
+        self._site_x = scene.stand_x(self)
+        self.carry = False
+        self._begin("fetch", now)
+
     def _idle(self, now):
         if self.state in ("held", "fall", "wtf"):
             self._blinking = False
@@ -1935,7 +2117,7 @@ class Roamer(tk.Toplevel):
     def _pose(self):
         """Everything paint() puts on the canvas, as one comparable value."""
         return (self._win_at, self._mark, self._blinking, self.face, self.look,
-                self.hands, self.feet,
+                self.hands, self.feet, self.carry,
                 round(self.x, 1), round(self.y, 1),
                 None if not self.phase else round(self.phase, 3),
                 round(self.facing, 3), round(self.lean, 2),
@@ -1966,6 +2148,16 @@ class Roamer(tk.Toplevel):
                 feet=_shift(self.feet, dx, dy),
                 face=face, look=self.look, squash=self.squash, roll=self.roll,
                 tag="walker")
+        if self.carry and self.hands is not None:
+            # After the figure, so it is in front of him rather than behind
+            # his chest, and in the yard's own wood so a plank and a wall are
+            # obviously the same stuff.
+            (lx, ly), (rx, ry) = self.hands
+            mid = (ly + ry) / 2.0 - dy
+            cv.create_rectangle(lx - dx - 4.0, mid - PLANK_H / 2.0,
+                                rx - dx + 4.0, mid + PLANK_H / 2.0,
+                                fill=yard.WOOD, outline=self.ink,
+                                tags="walker")
         if self._mark:
             cv.create_text(self.x - dx, self.y - dy - STAND_H - HEAD,
                            text=self._mark, fill=self.limb, font=MARK_FONT,
