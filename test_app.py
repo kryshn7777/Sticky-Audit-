@@ -624,7 +624,15 @@ def main():
         assert figure.visible(), "so the note goes on drawing him"
         assert sheet(window)[0] - was_at[0] == 70, \
             ("and the drag moves the note instead", sheet(window), was_at)
-        window._press_end(at(fx + 70, fy))
+        # The gesture is dropped rather than finished. All of this lives
+        # in _press_move; letting _press_end land the drag would run the
+        # drop through _settle_drop, which asks Windows what is under the
+        # note's top strip - and that is whatever the person running this
+        # happens to have open, so the note would pin itself to something
+        # different every run. What a landed drag does is checked where
+        # the note is dragged on purpose.
+        window._press = None
+        window._dragging = window._tapped = False
         pump(app.root)
     finally:
         roamer.MAX_ROAMERS = was_max
