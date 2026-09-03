@@ -47,6 +47,7 @@ import time
 import tkinter as tk
 
 import winkit
+import yard
 from mascot import (FACES, HEAD, LEG_H, _aim, _beat, _clamp, _dist, _face_mix,
                     _mix, _smooth, _spring, _walker)
 from store import shade
@@ -131,6 +132,10 @@ TALK3 = (("approach", 34), ("greet", 20), ("say0", 46), ("react", 22),
 # Shorter than a conversation on purpose. Cruelty is quick.
 MOCK = (("notice", 18), ("point", 40), ("laugh", 54), ("burn", 30),
         ("storm", 26))
+# The two left behind pick it up from `wave` and take it to a close. Shorter
+# than what it replaces on purpose: they were three sentences into a
+# conversation, and this is the end of one, not the start of another.
+FAREWELL = (("wave", 24), ("say0", 40), ("agree", 22), ("part", 30))
 
 # Which role is talking, by beat name. Everything else about a scene - who
 # looks at whom, who laughs, who is left standing - falls out of this and the
@@ -141,6 +146,27 @@ MOCK = (("notice", 18), ("point", 40), ("laugh", 54), ("burn", 30),
 # for two - the one who just spoke thinks, everybody else laughs - was already
 # the rule for any number of them.
 SPEAKS = {"say0": 0, "say1": 1, "say2": 2}
+
+
+def _beat_start(table, name):
+    """The frame a named beat begins on, or None.
+
+    Worked out rather than written down: retiming a table by a frame would
+    otherwise quietly move something that is meant to land on the start of a
+    sentence to somewhere in the middle of the one before it.
+    """
+    i = 0
+    for beat, n in table:
+        if beat == name:
+            return i
+        i += n
+    return None
+
+
+# ---------------------------------------------------------- excusing yourself
+BOW_ODDS = 0.35         # how often a three-way is one of them leaving early
+BOW_AT = _beat_start(TALK3, "say1")
+BYE_S = 0.9             # the wave, before he turns and goes
 
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
@@ -218,7 +244,7 @@ class _Scene:
     """
 
     __slots__ = ("kind", "table", "cast", "i", "mid", "last_speaker",
-                 "victim")
+                 "victim", "gone_way")
 
     def __init__(self, kind, table, cast):
         self.kind = kind
@@ -231,6 +257,9 @@ class _Scene:
         # lifted out of a scene is taken out of the cast before it is closed,
         # and then the last one left in it is a mocker.
         self.victim = None
+        # Which way the one who excused himself went, so the two left wave
+        # after him rather than at each other.
+        self.gone_way = 0.0
 
     def speaker(self):
         """Whose turn it is, or None on a beat where nobody is talking."""
@@ -275,6 +304,56 @@ def _turn_on(scene, guy, now):
     guy._watching = None
     guy._stir_at = now
     guy._begin("chat", now)
+
+
+def _bow_out(scene, guy, now):
+    """One of them has somewhere else to be.
+
+    The scene does not end. He comes out of the cast, the two left keep their
+    places and take the roles 0 and 1, and the table goes back to the start of
+    a shorter one - so they see him off and then have a last word with each
+    other, rather than standing through beats written for three with nobody
+    left to speak them.
+
+    `scene.mid` is deliberately not recomputed. The two left are already stood
+    where they were; the only beat that solves a position against mid is
+    `approach`, which FAREWELL does not have, so moving it would change
+    nothing except where somebody watching from outside thinks they are.
+    """
+    if guy not in scene.cast or len(scene.cast) < 3:
+        return
+    scene.cast.remove(guy)
+    scene.table = FAREWELL
+    scene.i = 0
+    scene.last_speaker = None
+    for i, other in enumerate(scene.cast):
+        other.role = i
+    guy.scene = None
+    guy.role = 0
+    guy._social_at = now
+    guy._leave_way = 1.0 if guy.x >= scene.mid else -1.0
+    scene.gone_way = guy._leave_way
+    guy._begin("bye", now)
+
+
+def _advance(scene, now):
+    """Whatever a scene does between beats.
+
+    One place for it, called once per scene per tick from `tick`, for the same
+    reason the beat index lives on the scene rather than on each of them:
+    decided inside a roamer's own step, whoever stepped first would settle it
+    a frame before whoever stepped second.
+    """
+    if scene.kind == "talk":
+        if (len(scene.cast) == 3 and scene.i == BOW_AT
+                and random.random() < BOW_ODDS):
+            # Never the one about to speak. Cutting somebody off mid-sentence
+            # is what the mock does, and this is meant to be the opposite of
+            # it: he waits for a gap, the way people do.
+            speaker = scene.speaker()
+            going = [g for g in scene.cast if g is not speaker]
+            if going:
+                _bow_out(scene, random.choice(going), now)
 
 
 def _close(scene, now):
@@ -342,7 +421,9 @@ def tick():
     # After the loop, not before it: that keeps the first tick of a scene
     # reading beat zero, which is what the old per-roamer counter did.
     for scene in list(scenes):
-        scene.i += 1
+        _advance(scene, now)
+        if scene in scenes:
+            scene.i += 1
     _arm(delay)
 
 
@@ -538,6 +619,11 @@ class Roamer(tk.Toplevel):
         except tk.TclError:
             tk.Toplevel.destroy(self)
             raise
+        self.key = key
+        # The yard is built on demand, but it is told where and in what colour
+        # here: app.root outlives every roamer, where the module's own _root is
+        # taken away under the tests to stop tick() arming timers behind them.
+        yard.attach(app.root, key)
         self.canvas = tk.Canvas(self, bg=key, highlightthickness=0, bd=0,
                                 width=RW, height=RH)
         self.canvas.pack(fill="both", expand=True)
@@ -597,6 +683,12 @@ class Roamer(tk.Toplevel):
         self._social_until = 0.0
         self._cross_until = 0.0
         self._lift_since = None
+        self.carry = False      # he is holding a plank
+        self._fetch = "out"     # which leg of the errand he is on
+        self._fetch_way = -1.0
+        self._site_x = self.x
+        self._turn_at = 0.0
+        self._panic_until = 0.0
 
         self.canvas.bind("<ButtonPress-3>", self._menu)
         self.canvas.bind("<ButtonPress-1>", self._grab)
@@ -808,6 +900,9 @@ class Roamer(tk.Toplevel):
             self._launched = False
             self.hands = self.feet = None
             self.vx = self.vy = self.spin = 0.0
+        elif state == "bye":
+            self._until = now + BYE_S
+            self.hands = self.feet = None
         elif state == "walk":
             self._stir_at = now
             x1, x2 = self.walk_line
@@ -1036,6 +1131,34 @@ class Roamer(tk.Toplevel):
         if now - self.since >= STOMP_S or self.x <= x1 or self.x >= x2:
             self._stir_at = now
             self._begin("rest", now)
+
+    def _do_bye(self, now, _dt):
+        """A hand up and a word, and then he is off.
+
+        He waves back at the two he is leaving rather than at where he is
+        going: `_leave_way` is the way out, so the wave is the other one. The
+        walk that follows is started the way `_close` starts one - state
+        first, goal second - because `_begin("walk")` picks its own
+        destination through `_company`, and `_company` would cheerfully aim
+        him straight back at the conversation he has just left.
+        """
+        self.squash, self.roll, self.crouch, self.lean = 1.0, 0.0, 0.0, 0.0
+        self.feet = None
+        self.phase = 0.0
+        self.y = self._floor_y()
+        self.face = FACES["happy"]
+        back = -self._leave_way
+        u = _clamp((now - self.since) / BYE_S, 0.0, 1.0)
+        self.facing = _clamp(back * 0.7, -1.0, 1.0)
+        self.look = _aim((self.x, self._face_y()),
+                         (self.x + back * 120.0, self._face_y()))
+        self.hands = self._one_hand(back, 22.0,
+                                    -18.0 + math.sin(u * 16.0) * 4.0)
+        self._say("bye!")
+        if now - self.since < BYE_S:
+            return
+        self._begin("walk", now)
+        self._goal = _clamp(self.x + self._leave_way * 200.0, *self.walk_line)
 
     def _watch_pointer(self):
         try:
@@ -1480,6 +1603,14 @@ class Roamer(tk.Toplevel):
             self.x = _mix(self.x, want, 0.10)
             self.phase = now * 6.0 if abs(self.x - want) > 2.0 else 0.0
             self.face = FACES["calm"]
+        elif beat == "wave":
+            # Somebody has just excused himself. They see him off - both of
+            # them turning the same way, after him, which is the only beat in
+            # any of these tables where they are not looking at each other.
+            self.face = FACES["happy"]
+            self.facing = _clamp(scene.gone_way * 0.6, -1.0, 1.0)
+            self.hands = self._one_hand(
+                scene.gone_way, 22.0, -18.0 + math.sin(u * 14.0) * 4.0)
         elif beat == "greet":
             if self.role == 0:
                 self.hands = self._one_hand(side, 22.0, -16.0)

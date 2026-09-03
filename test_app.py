@@ -52,6 +52,7 @@ def _load_entrypoint():
 app_module = _load_entrypoint()
 import roamer  # noqa: E402
 import store  # noqa: E402
+import yard  # noqa: E402
 
 
 def pump(widget, times=3):
@@ -530,10 +531,22 @@ def main():
         # enjoying this" special and forces the same reaction twice.
         figure._taps, figure._last_tap = 0, 0.0
         window._press_start(tap)
+        # Everything the tap depends on, read before _press_end throws it away.
+        # A bare "he did not react" says nothing about which of the four things
+        # that have to be true was not.
+        why = (window._tapped, window._roamer, figure.away, bool(figure._eyes),
+               figure._offset, figure._face_box, (tap.x, tap.y))
         window._press_end(tap)
+        # Read before the pump, not after. react() picks the reaction and puts
+        # up its first frame in the same call, so this is the whole of what a
+        # tap is meant to do; pumping first asks a second question - whether
+        # it is still running some frames later - which is a question about
+        # how long the machine took, and it answered no often enough to be
+        # worth not asking.
+        started = figure._reaction
         pump(app.root)
-        assert figure._reaction is not None, "a tap must get a reaction out of him"
-        seen.add(figure._reaction)
+        assert started is not None,             "a tap must get a reaction out of him: %r" % (why,)
+        seen.add(started)
         for _ in range(mascot_mod.REACT_FRAMES + 3):
             pump(app.root)
             if figure._react_job is not None:
@@ -1195,6 +1208,64 @@ def main():
         assert goer not in roamer.crew and not goer.winfo_exists(), \
             "and he has to be gone off the screen at the end of it"
         print("ok  asked to leave, he jumps off the bar and is gone")
+
+        # --- a ball, a hut, and excusing yourself ----------------------------
+        # A fresh three off the three notes: a is still in somebody's hand
+        # from the check above, and these want everybody on the floor.
+        roamer.send_all_home()
+        pump(app.root)
+        crowd = [roamer.Roamer(app, paper, 0.0, floor)
+                 for paper in (window, second, third)]
+
+        def settle(guys, at=None, gap=roamer.CHAT_GAP):
+            """Everybody on the floor, in a row, willing, and in nothing."""
+            for stale in list(roamer.scenes):
+                roamer._close(stale, roamer._time())
+            yard.drop_ball()
+            middle = (left + right) / 2.0 if at is None else at
+            for k, one in enumerate(guys):
+                one.x = middle + (k - 1) * gap
+                one.state, one.floor, one.y = "rest", floor, floor
+                one.vx = one.vy = 0.0
+                one.carry = False
+                one._until = time.monotonic() + 999.0
+                one._social_at = one._social_until = one._cross_until = 0.0
+
+        # one of them excuses himself, and the other two carry on without him
+        # (nothing but a talk exists yet, so there is no scene kind to pin)
+        was_bow, roamer.BOW_ODDS = roamer.BOW_ODDS, 1.0
+        try:
+            settle(crowd)
+            step(3)
+            scene = crowd[0].scene
+            assert scene is not None and scene.kind == "talk", scene
+            assert len(scene.cast) == 3, len(scene.cast)
+            cast_was = list(scene.cast)
+            scene.i = roamer.BOW_AT - 1
+            step(2)
+            assert len(scene.cast) == 2, \
+                ("one of them has to have excused himself", len(scene.cast))
+            assert scene in roamer.scenes, \
+                "and the scene has to carry on without him"
+            assert scene.table is roamer.FAREWELL, "on a shorter table"
+            assert sorted(one.role for one in scene.cast) == [0, 1], \
+                "with the roles re-indexed, or nobody speaks again"
+            gone = [one for one in cast_was if one not in scene.cast][0]
+            assert gone.state == "bye", gone.state
+            assert gone.scene is None, "he is out of it, not still in it"
+            assert all(one.state == "chat" for one in scene.cast), \
+                [one.state for one in scene.cast]
+        finally:
+            roamer.BOW_ODDS = was_bow
+        step(1)
+        assert gone._mark == "bye!", ("he says it", gone._mark)
+        step(600, lambda: gone.state == "walk")
+        assert gone.state == "walk", gone.state
+        assert (gone._goal - scene.mid) * (gone.x - scene.mid) > 0, \
+            "and he walks away from them, not back through the middle"
+        step(600, lambda: not roamer.scenes)
+        assert not roamer.scenes, "the two left have to part in the end"
+        print("ok  one of them says bye and the other two finish without him")
 
         # --- and none of it is left running ---------------------------------
         roamer.send_all_home()
