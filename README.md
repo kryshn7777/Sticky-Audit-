@@ -224,7 +224,11 @@ for; dragging his face used to move the note, and now moves him.
 
 **Picking him up.** Press his face and drag and he peels off the note into a
 window of his own. From that moment he is a character rather than a decoration
-on a sheet of paper.
+on a sheet of paper. Six of them can be out at once (`MAX_ROAMERS`), which is
+a cap on windows rather than on the crowd - each of them needs a full-screen
+layered window of his own, while the crowd itself handles any number by
+breaking into groups. Drag the seventh and the drag moves his note instead,
+because a drag that does nothing at all reads as the note being broken.
 
 While you are carrying him he does not enjoy it: eyes screwed shut, mouth
 open, arms thrown up and down against each other, legs kicking, the whole of

@@ -491,6 +491,27 @@ def main():
     # it at the end, because he is standing on the side that has turned.
     assert 0.0 < flip._turned < 1.0, flip._turned
 
+    # The overlay is pinned to the note's corner, and every coordinate in it
+    # is the note window's own - so a note dragged out from under a colour
+    # change has to take the crease with it. It used to be placed once, when
+    # the fold was built, and the sheet would walk off and leave it folding
+    # thin air where the note had been.
+    home_at = (window.winfo_x(), window.winfo_y())
+    window.geometry("+%d+%d" % (home_at[0] + 90, home_at[1] + 40))
+    pump(app.root)
+    flip._step(drag_at + dict(flip.beats)["drag"] // 2)
+    if flip._job is not None:
+        flip.after_cancel(flip._job)
+        flip._job = None
+    pump(app.root)
+    assert (flip.winfo_rootx(), flip.winfo_rooty()) == \
+        (window.winfo_rootx(), window.winfo_rooty()), \
+        ("the fold has to travel with the note",
+         (flip.winfo_rootx(), flip.winfo_rooty()),
+         (window.winfo_rootx(), window.winfo_rooty()))
+    window.geometry("+%d+%d" % home_at)
+    pump(app.root)
+
     flip.finish()
     pump(app.root)
     assert figure._swipe is None, "and clear the animation away after itself"
@@ -581,10 +602,38 @@ def main():
     window._press_end(pull)
     pump(app.root)
     assert window._roamer is None, "letting go hands him over to the crew"
+
     roamer.send_all_home()
     pump(app.root)
     assert figure.visible() and not roamer.crew, "and he can always be sent back"
     assert sheet(window) == stayed
+
+    # ...and when the crew is full he cannot come off, so the drag has to fall
+    # through to what a drag does everywhere else on the note. It used to be
+    # swallowed: the mascot stayed, the note stayed, and the drag did nothing
+    # at all. Pinned to nought rather than to the real cap, because this is
+    # about what happens when there is no room, not about how much room
+    # there is.
+    was_max, roamer.MAX_ROAMERS = roamer.MAX_ROAMERS, 0
+    try:
+        was_at = sheet(window)
+        window._press_start(at(fx, fy))
+        window._press_move(at(fx + 70, fy))
+        pump(app.root)
+        assert window._roamer is None, "a full crew has no room for him"
+        assert figure.visible(), "so the note goes on drawing him"
+        assert sheet(window)[0] - was_at[0] == 70, \
+            ("and the drag moves the note instead", sheet(window), was_at)
+        window._press_end(at(fx + 70, fy))
+        pump(app.root)
+    finally:
+        roamer.MAX_ROAMERS = was_max
+    window.note["x"], window.note["y"] = was_at[0], was_at[1]
+    window._apply_geometry(window.note["w"], window.note["h"],
+                           was_at[0], was_at[1])
+    window.flush()
+    pump(app.root)
+    assert sheet(window) == was_at, "and it goes back where it was"
     app.tracker.register(figure)
     figure.hush()
     print("ok  tapping him reacts, dragging him picks him up, the note stays put")

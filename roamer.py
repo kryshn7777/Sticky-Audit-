@@ -79,7 +79,10 @@ TICK_MS = 16                     # while something is actually happening
 GRIP_MS = 60                     # hanging on a note
 REST_MS = 200                    # stood on the floor
 SLEEP_MS = 500                   # asleep on the floor
-MAX_ROAMERS = 3
+# Each of them is a full-screen layered window of his own, which is what
+# this is a cap on - not the crowd, which handles any number by breaking into
+# groups. Three was too few to get four notes' worth of them out at once.
+MAX_ROAMERS = 6
 
 # -------------------------------------------------------------------- physics
 FRAME_S = 0.016

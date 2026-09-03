@@ -1469,6 +1469,7 @@ class _Flip(tk.Toplevel):
         self.canvas.pack(fill="both", expand=True)
         self.geometry("%dx%d+%d+%d" % (w, h, window.winfo_rootx(),
                                        window.winfo_rooty()))
+        self._win_at = (window.winfo_rootx(), window.winfo_rooty())
 
         self.home = mascot.head_at()
         # He works on the same floor the standing pose uses, so stepping onto
@@ -1709,6 +1710,23 @@ class _Flip(tk.Toplevel):
 
     # ---------------------------------------------------------------- frames
 
+    def _follow(self):
+        """The note can be dragged out from under a colour change.
+
+        Only the corner has to keep up. Every coordinate in here - the sheet,
+        the words, where he stands, where he takes hold - is the note window's
+        own, because the overlay is pinned to that window's corner, so moving
+        the corner moves all of it and nothing has to be worked out again. One
+        frame behind the note, exactly like the hands of a roamer hanging off
+        a note somebody is dragging.
+        """
+        win = self.mascot.win
+        at = (win.winfo_rootx(), win.winfo_rooty())
+        if at == self._win_at:
+            return
+        self._win_at = at
+        self.geometry("+%d+%d" % at)
+
     def _step(self, i):
         self._job = None
         beat, u = self._at(i)
@@ -1716,6 +1734,7 @@ class _Flip(tk.Toplevel):
             self.finish()
             return
         try:
+            self._follow()
             self.canvas.delete("all")
             self._frame(beat, u)
         except tk.TclError:

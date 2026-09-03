@@ -842,7 +842,8 @@ class NoteWindow(tk.Toplevel):
         self.app.set_mascot(self.var_mascot.get())
 
     def _detach_mascot(self, event):
-        """Peel him off the note and hand him to whoever is dragging.
+        """Peel him off the note and hand him to whoever is dragging. True if
+        he came off, and False if there was no room for him out there.
 
         He starts exactly where he was standing rather than under the cursor,
         so the hand-off never blinks - and the sheet does not move, because
@@ -851,19 +852,20 @@ class NoteWindow(tk.Toplevel):
         hand at the very moment they are using it.
         """
         if len(roamer.crew) >= roamer.MAX_ROAMERS:
-            return
+            return False
         head = self.mascot.head_at()
         try:
             guy = roamer.Roamer(self.app, self,
                                 self.winfo_rootx() + head[0],
                                 self.winfo_rooty() + head[1] + roamer.STAND_H)
         except tk.TclError:
-            return                      # no chroma key: he stays on the note
+            return False                # no chroma key: he stays on the note
         self.mascot.leave()
         self._roamer = guy
         # Taken hold of where he was standing rather than snapped under the
         # pointer. The drag has only just passed the slop, so he barely moves.
         guy.pick_up(event.x_root, event.y_root)
+        return True
 
     def mascot_home(self):
         """He is back, and the note draws him again."""
@@ -1038,11 +1040,14 @@ class NoteWindow(tk.Toplevel):
         if not self._dragging:
             if abs(dx) < DRAG_SLOP and abs(dy) < DRAG_SLOP:
                 return None                 # a click, not a drag: leave the note alone
-            if self._tapped:
+            if self._tapped and self._detach_mascot(event):
                 # A drag that began on his face is for him. The note stays
                 # exactly where it is - dragging the note is what the rest of
-                # the paper, and the strip along the top, are for.
-                self._detach_mascot(event)
+                # the paper, and the strip along the top, are for. If he
+                # cannot come off - the crew is full, or there is no chroma
+                # key to give him a window - the drag falls through to the
+                # note, because a drag that does nothing at all reads as the
+                # note being broken rather than as the crew being full.
                 return "break"
             on_grip = (event.widget is self.canvas
                        or event.y_root - self.winfo_rooty() - self._margins()[1] < GRIP_H)
