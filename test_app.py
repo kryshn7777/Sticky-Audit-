@@ -903,6 +903,16 @@ def main():
         perch.vanish()
         print("ok  he takes hold where he is dropped, and stands on a top edge")
 
+        # Every scene check from here down to the kickabout is about a
+        # conversation running to its end with everybody in it. Left to
+        # itself _pick_scene hands a quarter of them a ball and a fifth of
+        # the threes a hut, and a third of the threes that do talk lose
+        # somebody before the last one has spoken - so a check waiting on a
+        # conversation would be sat waiting on a game of football, and one
+        # counting who spoke would be counting two of three. The blocks that
+        # want those turn them on for themselves.
+        roamer.BUILD_ODDS = roamer.FOOTY_ODDS = roamer.BOW_ODDS = 0.0
+
         # two of them on the same floor hold a conversation, once
         a = roamer.Roamer(app, window, right - 420.0, floor)
         b = roamer.Roamer(app, second, right - 420.0 + roamer.CHAT_R * 0.7, floor)
@@ -1266,6 +1276,34 @@ def main():
         step(600, lambda: not roamer.scenes)
         assert not roamer.scenes, "the two left have to part in the end"
         print("ok  one of them says bye and the other two finish without him")
+
+        # they kick a ball about, and it goes when they do
+        was_build, was_footy = roamer.BUILD_ODDS, roamer.FOOTY_ODDS
+        roamer.BUILD_ODDS, roamer.FOOTY_ODDS = 0.0, 1.0
+        settle(crowd)
+        step(3)
+        scene = crowd[0].scene
+        assert scene is not None and scene.kind == "footy", scene
+        assert yard.ball() is not None, "a kickabout needs a ball"
+        assert yard.ball().y < floor - roamer.STAND_H,             "and it is thrown in above their heads"
+        booted = []
+
+        def kicked():
+            live = yard.ball()
+            if live is None:
+                return True
+            # Only a boot can send it up that fast. It comes in falling, and
+            # nothing else in the physics ever adds to its speed.
+            if live.vy <= -roamer.KICK_VY * 0.9:
+                booted.append(live.vy)
+            return bool(booted)
+
+        step(60 * 20, kicked)
+        assert booted, "somebody has to actually kick it"
+        step(60 * 40, lambda: not roamer.scenes)
+        assert not roamer.scenes, "and the game has to end"
+        assert yard.ball() is None, "and the ball goes with them"
+        print("ok  they kick a ball about, and take it with them")
 
         # --- and none of it is left running ---------------------------------
         roamer.send_all_home()

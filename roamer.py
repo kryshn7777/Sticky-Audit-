@@ -168,6 +168,22 @@ BOW_ODDS = 0.35         # how often a three-way is one of them leaving early
 BOW_AT = _beat_start(TALK3, "say1")
 BYE_S = 0.9             # the wave, before he turns and goes
 
+# --------------------------------------------------------------------- a ball
+# One long beat rather than a sequence: there is nothing to choreograph. Who
+# is chasing is decided from where the ball is, every frame, so possession
+# changes hands the moment somebody else is nearer - which is the entire game,
+# and enough of one. Two of them converging on a ball and one getting there
+# first reads as football without anybody being told the rules.
+FOOTY = (("kickabout", 780),)    # about thirteen seconds
+FOOTY_ODDS = 0.25
+KICK_R = 26.0                    # near enough to get a boot to it
+KICK_VX, KICK_VY = 300.0, 620.0
+CHASE_SPEED = WALK_SPEED * 2.4   # nobody walks at a loose ball
+
+# ---------------------------------------------------------------------- a hut
+BUILD = (("agree", 30), ("send", 6))
+BUILD_ODDS = 0.20
+
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
 WTF_HOLD = 0.22         # held this long, so a flick past does not trip it
@@ -193,6 +209,7 @@ _job = None
 _root = None
 STEP = None             # tests pin the step so the physics repeats exactly
 _stamp = None
+_last = None            # the last frame the yard was stepped on
 
 
 def _time():
@@ -365,6 +382,8 @@ def _close(scene, now):
     """
     if scene in scenes:
         scenes.remove(scene)
+    if scene.kind == "footy":
+        yard.drop_ball()
     # Sometimes one of them is held back off the cooldown. All of them coming
     # free together is a group that always reforms whole, and there is never
     # an odd one out to be left watching or walked in on; all of them held
@@ -401,7 +420,7 @@ def _close(scene, now):
 def tick():
     """One step for everybody. Safe to call directly, which is how the tests
     drive it."""
-    global _stamp
+    global _stamp, _last
     _cancel()
     if not crew:
         return
@@ -411,6 +430,10 @@ def tick():
     else:
         _stamp = (time.monotonic() if _stamp is None else _stamp) + STEP
         now = _stamp
+    # The yard has no clock of its own on purpose: one timer serves the crew,
+    # and a ball is part of the same frame they are.
+    dt = STEP if STEP is not None else min(now - (_last or now), MAX_STEP)
+    _last = now
     _cast(now)
     delay = SLEEP_MS
     for guy in list(crew):
@@ -424,6 +447,8 @@ def tick():
         _advance(scene, now)
         if scene in scenes:
             scene.i += 1
+    yard.step(dt)
+    yard.paint()
     _arm(delay)
 
 
@@ -470,6 +495,28 @@ def _incoming(band, group, now):
     return False
 
 
+def _pick_scene(ready):
+    """Talk, football, or - once there are three of them - a hut.
+
+    One roll cut into three rather than a roll each. A chain of independent
+    odds makes whatever is last on the list far rarer than its number reads,
+    and these numbers are meant to say how often you see each of them.
+    """
+    roll = random.random()
+    if len(ready) > 2 and yard.hut() is None and roll < BUILD_ODDS:
+        return "build", BUILD
+    if roll < BUILD_ODDS + FOOTY_ODDS:
+        return "footy", FOOTY
+    return "talk", TALK3 if len(ready) > 2 else TALK2
+
+
+def _kick_off(scene, now):
+    """A ball, thrown in between them. No ball, no game."""
+    first = scene.cast[0]
+    if yard.kick_off(scene.mid, first.floor) is None:
+        _close(scene, now)
+
+
 def _cast(now):
     """Who is in a scene with whom, and who is being dangled over whom.
 
@@ -498,8 +545,10 @@ def _cast(now):
                 j += 1
             ready = [g for g in group if g.sociable(now)][:3]
             if len(ready) >= 2 and not _incoming(band, group, now):
-                _open(ready, "talk",
-                      TALK3 if len(ready) > 2 else TALK2, now)
+                kind, table = _pick_scene(ready)
+                scene = _open(ready, kind, table, now)
+                if kind == "footy":
+                    _kick_off(scene, now)
             i = j
 
     # Anybody left over, against whatever is already running. Watchers are
@@ -546,6 +595,9 @@ def shutdown():
         guy.go_home()
     del crew[:]
     del scenes[:]
+    global _last
+    _last = None
+    yard.clear()
 
 
 send_all_home = shutdown
@@ -845,6 +897,7 @@ class Roamer(tk.Toplevel):
             pass
         if not crew:
             _cancel()
+            yard.clear()
 
     def destroy(self):
         self.vanish()
@@ -1497,7 +1550,7 @@ class Roamer(tk.Toplevel):
             scene.cast.remove(self)
         _close(scene, now)
 
-    def _do_chat(self, now, _dt):
+    def _do_chat(self, now, dt):
         scene = self.scene
         if scene is None or scene not in scenes or self not in scene.cast:
             self._social_at = now
@@ -1512,6 +1565,8 @@ class Roamer(tk.Toplevel):
             scene.last_speaker = scene.speaker()
         if scene.kind == "mock":
             self._mock_beat(scene, beat, u, now)
+        elif scene.kind == "footy":
+            self._footy_beat(scene, u, now, dt)
         else:
             self._talk_beat(scene, beat, u, now)
 
@@ -1765,6 +1820,53 @@ class Roamer(tk.Toplevel):
             self._begin("rest", now)
 
     # ----------------------------------------------------------------- idling
+
+    def _footy_beat(self, scene, u, now, dt):
+        """A ball, and whoever is nearest it.
+
+        No sides, no goals and no score. The chaser is worked out from
+        distance every frame rather than being appointed, so possession
+        changes hands the instant somebody else is closer - which is what
+        makes two of them converging on a loose ball read as a game.
+
+        He kicks it at one of the others rather than at nowhere, and only on
+        the way down: without the vy >= 0 he re-boots the same ball on the
+        four frames after the first one, and it goes through the ceiling.
+        """
+        ball = yard.ball()
+        if ball is None:
+            _close(scene, now)
+            return
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.hands = self.feet = None
+        self.lean, self.phase = 0.0, 0.0
+        self.y = self._floor_y()
+        self.face = _face_mix(FACES["calm"], FACES["happy"], 0.5)
+        self.facing = _clamp((ball.x - self.x) / 70.0, -1.0, 1.0)
+        self.look = _aim((self.x, self._face_y()), (ball.x, ball.y))
+        here = [g for g in scene.cast if g.state == "chat"]
+        if not here or min(here, key=lambda g: abs(g.x - ball.x)) is not self:
+            # Up on his toes, waiting for it to come his way.
+            self.y = self._floor_y() - abs(math.sin(now * 3.0 * TAU)) * 2.0
+            return
+        gap = ball.x - self.x
+        if abs(gap) > KICK_R:
+            way = 1.0 if gap > 0 else -1.0
+            x1, x2 = self._walls()
+            self.x = _clamp(self.x + way * CHASE_SPEED * dt, x1, x2)
+            self.phase += CHASE_SPEED * dt / STEP_PX * math.pi
+            self.lean = way * 3.4
+            return
+        if ball.vy < 0.0 or ball.y < self.floor - STAND_H:
+            return                      # over his head, or already on its way
+        others = [g for g in scene.cast if g is not self]
+        at = random.choice(others) if others else self
+        ball.vx = math.copysign(KICK_VX, (at.x - self.x) or 1.0)
+        ball.vy = -KICK_VY
+        self.face = FACES["strain"]
+        self.y = self._floor_y() - 4.0
+        self.feet = ((self.x - 6.0, self.y),
+                     (self.x + math.copysign(18.0, ball.vx), self.y - 10.0))
 
     def _idle(self, now):
         if self.state in ("held", "fall", "wtf"):
