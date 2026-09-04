@@ -15,16 +15,16 @@ import sys
 import tempfile
 import time
 
-FAKE_APPDATA = tempfile.mkdtemp(prefix="stickynote-test-")
+FAKE_APPDATA = tempfile.mkdtemp(prefix="sticky-test-")
 os.environ["APPDATA"] = FAKE_APPDATA
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-if os.environ.get("STICKYNOTE_TEST_NO_TOPMOST"):
+if os.environ.get("STICKY_TEST_NO_TOPMOST"):
     # These are real windows, and real windows sit on top of whatever the
     # person running the suite is doing for the minute or two it takes. Set
-    # STICKYNOTE_TEST_NO_TOPMOST=1 to get the screen back. Off by default, so
+    # STICKY_TEST_NO_TOPMOST=1 to get the screen back. Off by default, so
     # what runs unattended is still what ships. The foreign window the clip
     # check puts up is a separate process and stays on top either way, which
     # is the point of it.
@@ -41,9 +41,9 @@ if os.environ.get("STICKYNOTE_TEST_NO_TOPMOST"):
 
 
 def _load_entrypoint():
-    """stickynote.pyw is not importable by name, so load it by path."""
+    """sticky.pyw is not importable by name, so load it by path."""
     spec = importlib.util.spec_from_file_location(
-        "stickynote_app", os.path.join(HERE, "stickynote.pyw"))
+        "sticky_app", os.path.join(HERE, "sticky.pyw"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -94,6 +94,72 @@ def main():
     data_file = app.store.path
     assert FAKE_APPDATA in data_file, "test must not touch the real notes file"
 
+    # --- the first thing he ever says -----------------------------------------
+    # Driven rather than waited for: the bubble is on a timer, and a check that
+    # sleeps for it would put a speech bubble into the middle of whichever
+    # block the suite happened to be running when it fired.
+    assert app._hello_job is not None, "a first run has a hello pending"
+    assert not app.store.settings["said_hello"], "and has not said it yet"
+    app.root.after_cancel(app._hello_job)
+    app._hello()
+    said = [w for w in app.windows.values() if w.mascot._bubble is not None]
+    assert len(said) == 1, ("one of them says it, once", len(said))
+    assert app.store.settings["said_hello"], "and it is written down"
+    said[0].mascot.hush()
+    app._hello()
+    assert not any(w.mascot._bubble is not None for w in app.windows.values()), \
+        "saying it again is not what once means"
+    pump(app.root)
+    print("ok  he introduces himself on the first run, and only then")
+
+    # --- Ctrl+Alt+N, from whatever you were doing -----------------------------
+    # Windows will not press a key for the suite, so the press itself is posted
+    # to the same window a real one goes to. That is the half worth checking:
+    # a hotkey registered against the thread instead never arrives at all,
+    # because Tcl's notifier drains the thread queue before anything of ours
+    # can look at it.
+    assert app.store.settings["quick_capture"], "on by default"
+    assert app.hotkey.hwnd, "and it owns a window to be told through"
+    before = len(app.store.notes)
+    winkit_mod = app_module.winkit
+    _wt = ctypes.wintypes
+    ctypes.windll.user32.PostMessageW(_wt.HWND(app.hotkey.hwnd),
+                                      winkit_mod._WM_HOTKEY,
+                                      winkit_mod._HOTKEY_ID, 0)
+    pump(app.root)
+    assert app.hotkey.pressed, "the window procedure has to see it"
+    assert app.tracker.also is not None, "and the tracker has to be looking"
+    app.tracker.tick()           # the look, driven rather than waited on
+    pump(app.root)
+    assert len(app.store.notes) == before + 1, (
+        "the key has to make a note", len(app.store.notes), before)
+    caught = app.windows[app.store.notes[-1]["id"]]
+    assert caught.editing, "and hand it to you ready to type into"
+    px, py = app.root.winfo_pointerxy()
+    assert abs(caught.winfo_rootx() - px) < 300 and \
+        abs(caught.winfo_rooty() - py) < 300, (
+        "somewhere near the pointer, not where the cascade was up to",
+        (caught.winfo_rootx(), caught.winfo_rooty()), (px, py))
+    caught.finish_edit()
+    # Taken off the desk completely rather than binned: the Trash is counted
+    # further down, and a note left in it there is this check's fingerprint on
+    # somebody else's.
+    app.trash_note(caught.note["id"])
+    app.store.purge(caught.note["id"])
+    app.store.save()
+    if app.toast is not None:
+        app.toast.close()
+        app.toast = None
+    app.refresh_board()
+    pump(app.root)
+    assert not app.store.trash, "and the Trash is as it was"
+
+    # Turned off, the key goes back to whoever else wants it.
+    assert app.set_quick_capture(False) is False, "off is off"
+    assert not app.store.settings["quick_capture"]
+    assert app.set_quick_capture(True) is True, "and on again is on"
+    print("ok  Ctrl+Alt+N drops a note where the pointer is")
+
     # --- first run hands the user a blank note, already in edit mode ----------
     assert len(app.store.notes) == 1, app.store.notes
     note_id = app.store.notes[0]["id"]
@@ -110,6 +176,52 @@ def main():
     assert reloaded.notes[0]["heading"] == "Groceries", reloaded.notes[0]
     assert reloaded.notes[0]["body"] == "milk\neggs\nbread"
     print("ok  edits autosave to disk with no OK pressed")
+
+    # --- an earlier version of a note is one menu away -------------------------
+    # On a note of its own: the checks further down were written against what
+    # they typed into the first one, and this would be overwriting it.
+    drafts = app.new_note("purple")
+    pump(app.root)
+    for text in ("first thoughts", "second thoughts"):
+        drafts.start_edit()
+        drafts.body.delete("1.0", "end")
+        type_into(app, drafts, drafts.body, text)
+        drafts.finish_edit()
+        pump(app.root)
+        # Two saves a second apart are one sitting, and the newest version is
+        # rewritten rather than piling up - which is the point of the gap. So
+        # the clock is pushed on here instead of the suite waiting two minutes
+        # to find out whether a menu has an entry in it.
+        if drafts.note["history"]:
+            drafts.note["history"][-1]["t"] -= store.HISTORY_GAP + 1.0
+
+    older = drafts.earlier_versions()
+    assert any(v["body"].strip() == "first thoughts" for v in older), (
+        "what it said before is still there", [v["body"] for v in older])
+    drafts._sync_menu()          # what opening the menu does, minus the popup
+    hist = drafts.menu_history
+    labels = [hist.entrycget(i, "label") for i in range(hist.index("end") + 1)]
+    assert any("first thoughts" in label for label in labels), labels
+
+    assert drafts.restore_version(
+        [i for i, v in enumerate(older)
+         if v["body"].strip() == "first thoughts"][0])
+    assert drafts.body.get("1.0", "end-1c").strip() == "first thoughts", (
+        "and putting it back puts it back", drafts.body.get("1.0", "end-1c"))
+    assert any(v["body"].strip() == "second thoughts"
+               for v in drafts.earlier_versions()), (
+        "restoring is itself undoable")
+
+    app.trash_note(drafts.note["id"])
+    app.store.purge(drafts.note["id"])
+    app.store.save()
+    if app.toast is not None:
+        app.toast.close()
+        app.toast = None
+    app.refresh_board()
+    pump(app.root)
+    assert not app.store.trash, "and the desk is as it was"
+    print("ok  an earlier version of a note is one menu away")
 
     # --- Enter in the heading moves to the content ----------------------------
     window.head.focus_set()
@@ -760,6 +872,40 @@ def main():
     assert len({(n["x"], n["y"]) for n in saved.notes}) == 2, "new notes must cascade"
     print("ok  multiple notes keep their own colour, text and position")
 
+    # --- finding a note by what is written on it ------------------------------
+    board = app.board
+    board.show()
+    pump(app.root)
+    rows_before = len(board.list.winfo_children())
+    assert rows_before >= 2, "there have to be a few notes to search"
+
+    board.var_find.set("milk")
+    pump(app.root)
+    assert board.matches({"heading": "", "body": "milk\neggs"}, ["milk"])
+    assert not board.matches({"heading": "", "body": "eggs"}, ["milk"])
+    assert board.matches({"heading": "Shop", "body": "milk"}, ["shop", "milk"]), \
+        "every word, not any of them"
+    assert not board.matches({"heading": "Shop", "body": "milk"},
+                             ["shop", "bread"])
+    found = len(board.list.winfo_children())
+    assert 0 < found < rows_before, (
+        "the list has to actually narrow", found, rows_before)
+    assert "/" in board.tab_notes.cget("text"), (
+        "and say how many of how many", board.tab_notes.cget("text"))
+
+    board.var_find.set("zzzz nothing says this")
+    pump(app.root)
+    labels = [w.cget("text") for w in board.list.winfo_children()
+              if w.winfo_class() == "Label"]
+    assert any("Nothing here says" in label for label in labels), labels
+
+    board._clear_find()
+    pump(app.root)
+    assert board.var_find.get() == "", "and clearing it clears it"
+    assert len(board.list.winfo_children()) == rows_before, (
+        "with everything back", len(board.list.winfo_children()), rows_before)
+    print("ok  the overview finds a note by what is written on it")
+
     # --- closing the overview must not take the notes with it -----------------
     app.board.hide()
     pump(app.root)
@@ -902,6 +1048,307 @@ def main():
         assert walls[0] <= guy.x <= walls[1], (guy.x, walls)
         guy.vanish()
 
+        # picked up, carried, and put down again: the three things a hand ever
+        # does to him, and each of them has to read as something happening to a
+        # body rather than as a sprite following the pointer.
+        mine = roamer.Roamer(app, window, right - 400.0, floor)
+        mine._begin("rest", roamer._time())
+        crank(2)
+        mine.pick_up(mine.x, mine.y)
+        crank(1)
+        assert mine.state == "held", mine.state
+        assert mine.squash > 1.05, ("the yank has to stretch him", mine.squash)
+        crank(int(roamer.GRAB_S / roamer.STEP) + 4)
+        assert mine.squash < 1.06, ("and be over inside GRAB_S", mine.squash)
+
+        # carried left, he hangs back the way he came, and the other way when
+        # the hand turns round. A pose that does not change with the direction
+        # of travel is the sprite on a string this replaces.
+        for i in range(4):
+            mine.drag_to(right - 400.0 - 40.0 * (i + 1), mine.y)
+            crank(1)
+        assert mine._swing < -1.0, ("he has to trail the hand", mine._swing)
+        left_lean = mine.lean
+        for i in range(4):
+            mine.drag_to(right - 560.0 + 40.0 * (i + 1), mine.y)
+            crank(1)
+        assert mine._swing > 1.0 and mine.lean < left_lean, \
+            ("and swing the other way when it turns round",
+             mine._swing, mine.lean, left_lean)
+
+        # clicked rather than dragged: a poke. He hops where he stands and has
+        # something to say about it - he is not thrown across the desk.
+        mine.pick_up(mine.x, mine.y)
+        crank(1)
+        was_x = mine.x
+        mine.let_go()
+        assert mine.vy < 0.0 and abs(mine.vx) < 1.0, \
+            ("a poke is a hop, not a throw", mine.vx, mine.vy)
+        assert mine._startle_until > roamer._time(), "and he has words about it"
+        crank(300, lambda: mine.state in ("rest", "walk"))
+        assert abs(mine.x - was_x) < 40.0, \
+            ("and he comes down where he was", mine.x, was_x)
+        mine.vanish()
+        print("ok  he is yanked up, trails the hand, and hops when poked")
+
+        # stood about with nothing on, he does something with his hands
+        idler = roamer.Roamer(app, window, right - 500.0, floor)
+        was_every, roamer.IDLE_EVERY = roamer.IDLE_EVERY, (0.0, 0.0)
+        idler._begin("rest", roamer._time())
+        idler._until = roamer._time() + 999.0
+        crank(3)
+        assert idler._act in roamer.IDLE_ACTS, ("something, and soon", idler._act)
+        assert idler.rate() == roamer.TICK_MS, \
+            "an arm going over his head is worth the frames"
+        acted = idler._act
+        # An idle every zero seconds is only for getting one started. Left on,
+        # the next begins on the frame this one ends and nothing is ever seen
+        # to finish.
+        roamer.IDLE_EVERY = (999.0, 999.0)
+        crank(int(max(roamer.IDLE_S.values()) / roamer.STEP) + 10)
+        assert idler._act is None, ("and it ends", idler._act, acted)
+        assert idler.hands is None and idler.feet is None, \
+            "with his arms back at his sides"
+        roamer.IDLE_EVERY = was_every
+        idler.vanish()
+        print("ok  standing still, he stretches, yawns, scratches and looks about")
+
+        # ...and nobody stands inside anybody. Two of them dropped on the same
+        # pixel shuffle apart rather than sharing a body, and they do it
+        # without a conversation to space them out.
+        near = [roamer.Roamer(app, window, right - 460.0, floor),
+                roamer.Roamer(app, window, right - 460.0, floor)]
+        spot = roamer._time()
+        for one in near:
+            one.floor, one.y = floor, floor
+            one.vx = one.vy = 0.0
+            one._begin("rest", spot)
+            one._until = spot + 999.0
+            one._social_until = spot + 999.0    # a queue, not a chat
+        crank(90)
+        assert abs(near[0].x - near[1].x) >= roamer.SPACE_R - 1.0, (
+            "nobody stands inside anybody", near[0].x, near[1].x)
+        assert all(one.state == "rest" for one in near), (
+            "and making room is not something they walk off to do",
+            [one.state for one in near])
+        for one in near:
+            one.vanish()
+        print("ok  two of them on one spot make room for each other")
+
+        # something goes full-screen and they get off the bar until it is over
+        assert roamer.winkit.covers((0, 0, 1280, 768), (0, 0, 1280, 768)), (
+            "a window the size of the screen covers it")
+        assert not roamer.winkit.covers((0, 0, 1280, 720), (0, 0, 1280, 768)), (
+            "and a maximised one, which stops at the taskbar, does not")
+
+        # A real prop on the screen, so "the yard goes too" is a check rather
+        # than a line that quietly passes because there is no yard yet.
+        yard.kick_off(left + 400.0, floor)
+        assert yard.ball() is not None and yard._win is not None, "a yard to hide"
+
+        shy_pair = [roamer.Roamer(app, window, left + 150.0, floor),
+                    roamer.Roamer(app, second, left + 220.0, floor)]
+        settled = roamer._time()
+        for one in shy_pair:
+            one.floor, one.y = floor, floor
+            one.vx = one.vy = 0.0
+            one._begin("rest", settled)
+            one._until = settled + 999.0
+            one._social_until = settled + 999.0
+        # The second of them is out past the edge, the way somebody fetching
+        # wood is. Where he comes back to has to be somewhere he can stand.
+        shy_pair[1].x = shy_pair[1]._walls()[0] - 90.0
+        homes = [one.x for one in shy_pair]
+
+        was_check = roamer.winkit.foreground_fullscreen
+        roamer.winkit.foreground_fullscreen = lambda: True
+        try:
+            roamer._shy_at = 0.0            # ask now rather than in half a second
+            crank(2)
+            assert roamer.shy, "the crew has to notice"
+            assert all(one.state == "shy" for one in shy_pair), (
+                [one.state for one in shy_pair])
+            gone = crank(60 * 8, lambda: all(one._shy_leg == "gone"
+                                             for one in shy_pair))
+            assert gone is not None, (
+                "they have to actually walk off it",
+                [(one._shy_leg, one.x) for one in shy_pair])
+            crank(1)
+            assert not any(one.winfo_viewable() for one in shy_pair), (
+                "and be off the screen, not drawn over the top of it")
+            assert not yard._win.winfo_viewable(), "the yard goes too"
+
+            # Peeled off a note in the middle of it: he lands and hides too,
+            # rather than standing on top of whatever is full-screen.
+            late = roamer.Roamer(app, window, left + 300.0, floor)
+            late.let_go()
+            assert late.state == "shy", (
+                "somebody dragged off during it hides as well", late.state)
+            late.vanish()
+        finally:
+            roamer.winkit.foreground_fullscreen = was_check
+
+        roamer._shy_at = 0.0
+        crank(2)
+        assert not roamer.shy, "and notice when it is over"
+        back = crank(60 * 12, lambda: all(one.state == "rest"
+                                          for one in shy_pair))
+        assert back is not None, (
+            "they have to come back", [(one.state, one.x) for one in shy_pair])
+        assert all(one.winfo_viewable() for one in shy_pair), "and be visible"
+        assert yard._win.winfo_viewable() and yard.ball() is not None, (
+            "and so does the yard, with the ball still in it")
+        assert abs(shy_pair[0].x - homes[0]) < 4.0, (
+            "to where he was standing, not to the edge he left by",
+            shy_pair[0].x, homes[0])
+        walls = shy_pair[1]._walls()
+        assert walls[0] <= shy_pair[1].x <= walls[1], (
+            "and somebody who was off the edge comes back onto the screen",
+            shy_pair[1].x, walls)
+        yard.drop_ball()
+        for one in shy_pair:
+            one.vanish()
+        print("ok  something full-screen and they clear off the bar for it")
+
+        # "Sit with me": a fire under the note, and he stays until it is out
+        was_focus, roamer.FOCUS_S = roamer.FOCUS_S, 4.0
+        try:
+            sitter = roamer.focus(second)
+            assert sitter is not None, "somebody has to come"
+            assert sitter.state == "vigil", sitter.state
+            lit = crank(60 * 30, lambda: yard.fire() is not None)
+            assert lit is not None and yard.fire() is not None, (
+                "he has to light one", sitter._vigil_leg, sitter.x)
+            assert sitter._vigil_leg == "sit", sitter._vigil_leg
+            near = abs(yard.fire().x - sitter.x)
+            assert near < roamer.FIRE_SEAT * 2, ("and sit by it", near)
+            crank(30)
+            assert sitter.crouch > 0.8 and sitter.y > sitter.floor, (
+                "sitting, not standing about", sitter.crouch)
+            assert roamer.focus(window) is None, (
+                "one fire at a time: his twenty-five minutes must not end "
+                "when somebody else's fifteen seconds do")
+
+            # Something full-screen in the middle of it does not end it. He
+            # hides like everybody else and comes back to his own fire.
+            was_check = roamer.winkit.foreground_fullscreen
+            roamer.winkit.foreground_fullscreen = lambda: True
+            try:
+                roamer._shy_at = 0.0
+                crank(2)
+                assert sitter.state == "shy", sitter.state
+            finally:
+                roamer.winkit.foreground_fullscreen = was_check
+            roamer._shy_at = 0.0
+            crank(2)
+            assert sitter.state == "vigil", (
+                "and goes back to the note he was sitting with", sitter.state)
+            assert yard.fire() is not None, "which is still burning"
+            crank(60 * 8, lambda: sitter._vigil_leg == "sit")
+            assert sitter._vigil_leg == "sit", sitter._vigil_leg
+
+            # It is the fire that ends this, not a frame count: a right-click
+            # on it is the same ending, earlier.
+            assert yard._win is not None
+            poke = type("Poke", (), {"x_root": yard.fire().x,
+                                     "y_root": floor - 10.0})()
+            was_popup = app_module.tk.Menu.tk_popup
+            app_module.tk.Menu.tk_popup = lambda self, *a, **k: None
+            try:
+                yard._win._click(poke)
+            finally:
+                app_module.tk.Menu.tk_popup = was_popup
+            menu = yard._win._menu
+            labels = [menu.entrycget(i, "label")
+                      for i in range(menu.index("end") + 1)]
+            assert "Put it out" in labels, labels
+            assert yard.fire() is not None, "asking is not doing"
+            menu.invoke(labels.index("Put it out"))
+            assert yard.fire() is None, "and the menu entry puts it out"
+
+            gone = crank(60 * 10, lambda: sitter not in roamer.crew)
+            assert gone is not None and sitter not in roamer.crew, (
+                "then he goes back to the note", sitter.state)
+            assert second.mascot.visible(), "and is on it again"
+        finally:
+            roamer.FOCUS_S = was_focus
+        print("ok  he sits with a note until the fire goes out")
+
+        # the last box on a note gets ticked, and he is not the only one who
+        # notices
+        boxes = app.new_note("green")
+        pump(app.root)
+        boxes.start_edit()
+        type_into(app, boxes, boxes.body, "[ ] milk\n[ ] eggs")
+        boxes.finish_edit()
+        pump(app.root)
+        assert mascot_mod.box_counts(boxes.note["body"]) == (2, 0), (
+            boxes.note["body"])
+
+        def tick(win, line):
+            """Tick one box the way a click on it does."""
+            win.body.configure(state="normal")
+            win.body.replace("%d.0" % line, "%d.%d" % (line, len(mascot_mod.BOX_OPEN)),
+                             mascot_mod.BOX_DONE)
+            win.body.configure(state="disabled")
+            win._after_box_change()
+
+        # Off a different note, so the man from this one is still on the paper
+        # and both halves of it can be seen at once.
+        watcher = roamer.Roamer(app, window,
+                                boxes.winfo_rootx() + 40.0, floor)
+        watcher.floor, watcher.y = floor, floor
+        watcher.vx = watcher.vy = 0.0
+        watcher._begin("rest", roamer._time())
+        watcher._until = roamer._time() + 999.0
+
+        # A second one, close enough that both come over: they have to end up
+        # in a row rather than in one shape.
+        crowder = roamer.Roamer(app, window, watcher.x + 8.0, floor)
+        crowder.floor, crowder.y = floor, floor
+        crowder.vx = crowder.vy = 0.0
+        crowder._begin("rest", roamer._time())
+        crowder._until = roamer._time() + 999.0
+
+        boxes.mascot.hush()
+        tick(boxes, 1)
+        assert watcher.state == "rest", (
+            "one box out of two is not a finished list", watcher.state)
+        assert boxes.mascot._bubble is None, "and nothing to say about it yet"
+
+        tick(boxes, 2)
+        assert mascot_mod.box_counts(boxes.note["body"]) == (0, 2), (
+            boxes.note["body"])
+        assert boxes.mascot._bubble is not None, (
+            "the man on the note has to notice")
+        assert watcher.state == "cheer" and crowder.state == "cheer", (
+            "and whoever is near enough comes over",
+            watcher.state, crowder.state)
+        assert abs(watcher._cheer_x - crowder._cheer_x) >= roamer.CHEER_GAP - 1.0, (
+            "with a place each", watcher._cheer_x, crowder._cheer_x)
+        crank(90)
+        assert abs(watcher.x - crowder.x) >= roamer.SPACE_R, (
+            "so two of them at one note are not one shape",
+            watcher.x, crowder.x)
+        crowder.vanish()
+        crank(60 * 6, lambda: watcher.state != "cheer")
+        assert watcher.state == "rest", (
+            "and goes back to what he was doing", watcher.state)
+
+        # Ticking a box on a list that was already finished is not finishing
+        # it again: there has to have been something left to do.
+        boxes.mascot.hush()
+        watcher._begin("rest", roamer._time())
+        boxes._after_box_change()
+        assert watcher.state == "rest" and boxes.mascot._bubble is None, (
+            "a list that was already done stays done")
+
+        watcher.vanish()
+        boxes.mascot.hush()
+        app.trash_note(boxes.note["id"])
+        pump(app.root)
+        print("ok  tick the last box and the note - and the bar - notice")
+
         # let go by a sheet and he takes hold of the edge and hangs there
         second._apply_geometry(second.note["w"], second.note["h"], 600, 260)
         pump(app.root)
@@ -969,6 +1416,7 @@ def main():
         # counting who spoke would be counting two of three. The blocks that
         # want those turn them on for themselves.
         roamer.BUILD_ODDS = roamer.FOOTY_ODDS = roamer.BOW_ODDS = 0.0
+        roamer.FIRE_ODDS = 0.0          # ...and a fifth of them a fire
 
         # two of them on the same floor hold a conversation, once
         a = roamer.Roamer(app, window, right - 420.0, floor)
@@ -1037,6 +1485,65 @@ def main():
         # of this one are built around.
         trio[2].vanish()
         print("ok  three of them talk, and everybody gets a turn")
+
+        # Four of them, and the fourth is in it rather than left stood
+        # outside it: a hut and a game of football want everybody who is
+        # there, not the first three to have turned up.
+        quad = [a, b, roamer.Roamer(app, third, 0.0, floor),
+                roamer.Roamer(app, third, 0.0, floor)]
+        park(quad)
+        step(5)
+        scene = quad[0].scene
+        assert scene is not None and len(scene.cast) == 4, "one cast of four"
+        assert all(one.scene is scene for one in quad), "and all in the same one"
+        assert sorted(one.role for one in quad) == [0, 1, 2, 3], "distinct roles"
+        spoke = set()
+
+        def note_fourth():
+            here = quad[0].scene
+            if here is not None:
+                who = here.speaker()
+                if who is not None:
+                    spoke.add(who.role)
+            return here is None
+
+        step(900, note_fourth)
+        assert spoke == {0, 1, 2, 3}, ("everybody gets a turn", spoke)
+        for one in quad[2:]:
+            one.vanish()
+        print("ok  four of them talk, and everybody gets a turn")
+
+        # A gesture a sentence. He waves, lays it out with both hands, counts
+        # it off, chops at it, points, or shrugs - and whichever it is, it
+        # holds for the whole sentence rather than being re-rolled per frame.
+        park([a, b])
+        step(5)
+        talk = a.scene
+        assert talk is not None and talk.kind == "talk", talk
+        drift = []
+
+        def note_gesture():
+            live = a.scene
+            if live is None:
+                return True
+            # scene.i has already been advanced past the frame that was
+            # drawn by the time this looks, so the beat that went with this
+            # gesture is the one before it.
+            beat, _ = roamer._beat(live.table, max(live.i - 1, 0))
+            drift.append((beat, live.gesture))
+            return False
+
+        step(900, note_gesture)
+        assert drift, "the conversation has to have run"
+        per_beat = {}
+        for beat, gesture in drift:
+            per_beat.setdefault(beat, set()).add(gesture)
+        assert all(len(shapes) == 1 for shapes in per_beat.values()), (
+            "one gesture holds for a whole sentence", per_beat)
+        assert len(set(g for _, g in drift)) > 1, (
+            "and they are not all the same shape", per_beat)
+        assert set(g for _, g in drift) <= set(roamer.TALK_GESTURES), per_beat
+        print("ok  every sentence gets its own gesture, and keeps it")
 
         # two of them talking, and a third who turns up and hangs back
         onlooker = roamer.Roamer(app, third, 0.0, floor)
@@ -1308,7 +1815,7 @@ def main():
             assert scene is not None and scene.kind == "talk", scene
             assert len(scene.cast) == 3, len(scene.cast)
             cast_was = list(scene.cast)
-            scene.i = roamer.BOW_AT - 1
+            scene.i = roamer._beat_start(roamer.TALK3, "say1") - 1
             step(2)
             assert len(scene.cast) == 2, \
                 ("one of them has to have excused himself", len(scene.cast))
@@ -1362,14 +1869,78 @@ def main():
         assert yard.ball() is None, "and the ball goes with them"
         print("ok  they kick a ball about, and take it with them")
 
+        # three of them light a fire, sit round it and see it out
+        roamer.BUILD_ODDS, roamer.FOOTY_ODDS = 0.0, 0.0
+        was_fire, roamer.FIRE_ODDS = roamer.FIRE_ODDS, 1.0
+        settle(crowd)
+        step(3)
+        scene = crowd[0].scene
+        assert scene is not None and scene.kind == "fire", scene
+        assert yard.fire() is not None, "a campfire needs a fire"
+        seats = sorted(scene.seat_x(one) for one in crowd)
+        assert seats[0] < scene.mid < seats[-1], (
+            "they sit round it rather than beside it", seats, scene.mid)
+
+        sat = step(60 * 8, lambda: all(one.crouch > 0.9 for one in crowd))
+        assert sat is not None, (
+            "they have to sit down", [one.crouch for one in crowd])
+        assert all(one.y > one.floor for one in crowd), (
+            "hips on the floor, feet in front of him",
+            [(one.y, one.floor) for one in crowd])
+        assert all(abs(one.x - scene.seat_x(one)) < 8.0 for one in crowd), (
+            "and each in his own place round it")
+
+        spoke = set()
+
+        def note_fire():
+            live = crowd[0].scene
+            if live is None:
+                return True
+            who = live.speaker()
+            if who is not None:
+                spoke.add(who.role)
+            return yard.fire() is None
+
+        out = step(60 * 40, note_fire)
+        assert out is not None and yard.fire() is None, "the fire has to go out"
+        assert spoke, ("and they talk while it burns", spoke)
+        assert all(one.state == "chat" for one in crowd), (
+            "nobody leaves before it does", [one.state for one in crowd])
+
+        waved = step(60 * 6, lambda: all(one._mark == "bye!" for one in crowd))
+        assert waved is not None, (
+            "everybody says goodbye", [one._mark for one in crowd])
+        assert all(one.crouch < 0.2 for one in crowd), (
+            "on their feet to do it", [one.crouch for one in crowd])
+        step(60 * 6, lambda: not roamer.scenes)
+        assert not roamer.scenes, "and the evening is over"
+        assert all(one.state == "walk" for one in crowd), (
+            "and they walk off", [one.state for one in crowd])
+        roamer.FIRE_ODDS = was_fire
+        print("ok  three of them sit round a fire until it burns out")
+
         # three of them fetch wood off the sides of the screen and build a hut
         roamer.BUILD_ODDS, roamer.FOOTY_ODDS = 1.0, 0.0
+        was_inside, roamer.INSIDE_S = roamer.INSIDE_S, (600.0, 600.0)
         # Near the left edge, so the errand is a few seconds rather than the
         # twenty a walk from the middle of a wide screen would take.
         settle(crowd, at=left + 140.0)
+        # A fourth, stood well clear of the site and in nothing. He carries no
+        # wood, but when the hut goes up he goes in with them: one of them left
+        # standing outside it reads as having been forgotten.
+        bystander = roamer.Roamer(app, paper, 0.0, floor)
+        # Out of the chain (further than CHAT_R from the rightmost of
+        # them, or he is cast in the build himself) and inside WATCH_R,
+        # so the walk to the door is a few seconds rather than twenty.
+        bystander.x = left + 350.0
+        bystander.state, bystander.floor, bystander.y = "rest", floor, floor
+        bystander.vx = bystander.vy = 0.0
+        bystander._until = time.monotonic() + 999.0
+        bystander._social_at = bystander._social_until = 0.0
         step(3)
         scene = crowd[0].scene
         assert scene is not None and scene.kind == "build", scene
+        assert bystander not in scene.cast, "he is not in the build"
         step(60 * 5, lambda: all(one.state == "fetch" for one in crowd))
         assert all(one.state == "fetch" for one in crowd), \
             [one.state for one in crowd]
@@ -1380,20 +1951,62 @@ def main():
         assert back is not None and yard.hut() is not None, \
             "three planks home and there has to be a hut"
         assert all(one.carry is False for one in crowd), "the wood is used up"
-        step(60 * 30, lambda: all(one.state == "inside" for one in crowd))
-        assert all(one.state == "inside" for one in crowd), \
-            [one.state for one in crowd]
+        assert bystander.state == "enter", \
+            ("the hut going up sends everybody in", bystander.state)
+        everyone = crowd + [bystander]
+        step(60 * 30, lambda: all(one.state == "inside" for one in everyone))
+        assert all(one.state == "inside" for one in everyone), \
+            [one.state for one in everyone]
         pump(app.root)
-        assert not any(one.winfo_viewable() for one in crowd), \
+        assert not any(one.winfo_viewable() for one in everyone), \
             "indoors is indoors"
         assert not roamer.scenes, "and the build is over"
         print("ok  they fetch wood off the screen and build a hut to go into")
 
-        # ...and right-clicking it brings them out screaming
+        # Something full-screen while they are indoors does not turn them out
+        # of the hut: they are a withdrawn window already, and a sweep that
+        # walked them to the edge would put them back outside it.
+        was_check = roamer.winkit.foreground_fullscreen
+        roamer.winkit.foreground_fullscreen = lambda: True
+        try:
+            roamer._shy_at = 0.0
+            step(2)
+            assert all(one.state == "inside" for one in crowd), (
+                "a man in a hut stays in it", [one.state for one in crowd])
+        finally:
+            roamer.winkit.foreground_fullscreen = was_check
+        roamer._shy_at = 0.0
+        step(2)
+        assert not roamer.shy, "and the flag comes back down"
+
+        # ...and right-clicking it brings them out screaming. The fourth
+        # goes here: the checks under this one are built around the three
+        # who put it up, and one more body running about proves nothing
+        # they do not.
+        bystander.vanish()
         where = yard.hut().x
-        yard.knock_down()
-        assert yard.hut() is None, "right-clicking it takes it down"
-        pump(app.root)
+        # The click itself only asks. tk_popup is stubbed out for the length
+        # of it: a real popup takes a grab, and a check that has to dismiss a
+        # grab is a check that hangs the suite the day it fails.
+        poke = type("Poke", (), {"x_root": where, "y_root": floor - 10.0})()
+        was_popup = app_module.tk.Menu.tk_popup
+        app_module.tk.Menu.tk_popup = lambda self, *a, **k: None
+        try:
+            yard._win._click(poke)
+        finally:
+            app_module.tk.Menu.tk_popup = was_popup
+        assert yard.hut() is not None, "a right-click on its own leaves it up"
+        menu = yard._win._menu
+        labels = [menu.entrycget(i, "label")
+                  for i in range(menu.index("end") + 1)]
+        assert "Knock it down" in labels and "Leave it standing" in labels, labels
+        menu.invoke(labels.index("Knock it down"))
+        assert yard.hut() is None, "and the menu entry is what takes it down"
+        planks = len(yard._wreck)
+        assert planks == yard.WRECK_N, ("it leaves a wreck behind", planks)
+        assert all(abs(plank[0] - where) < yard.HUT_W for plank in yard._wreck), (
+            "lying where the hut stood")
+        step(2)
         assert all(one.winfo_viewable() for one in crowd), \
             "and everybody in it comes straight back out"
         assert all(one.state == "panic" for one in crowd), \
@@ -1407,7 +2020,16 @@ def main():
         step(60 * 10, lambda: all(one.state == "rest" for one in crowd))
         assert all(one.state == "rest" for one in crowd), \
             ("and settle again", [one.state for one in crowd])
+        # Every plank has its own time on it, so the pile thins out rather
+        # than blinking out whole. Six seconds in, the shortest-lived of them
+        # are gone; another eight and there is nothing left to draw.
+        step(60 * 3)
+        assert len(yard._wreck) < planks, (
+            "the wreck goes a plank at a time", len(yard._wreck), planks)
+        step(60 * 8)
+        assert not yard._wreck, "until there is nothing left of it"
         roamer.BUILD_ODDS, roamer.FOOTY_ODDS = was_build, was_footy
+        roamer.INSIDE_S = was_inside
         print("ok  knock the hut down and they come out screaming")
 
         # --- and none of it is left running ---------------------------------
@@ -1434,9 +2056,13 @@ def main():
         print("ok  he goes home, and leaves nothing running behind him")
 
         # The third sheet was only ever somewhere for the third of them to
-        # come from. The checks past here count what is on the desk.
+        # come from. The checks past here count what is on the desk - and a
+        # note going in the bin takes whoever came off it with it, or clearing
+        # the desk leaves him stood on the taskbar with nothing behind him.
+        stray = roamer.Roamer(app, third, 0.0, floor)
         app.trash_note(third.note["id"])
         pump(app.root)
+        assert stray not in roamer.crew and not roamer.crew,             "his note went in the bin and he went with it"
     roamer.STEP = None
 
     # --- pinning a note to another application's window -----------------------
@@ -1487,7 +2113,7 @@ def main():
         pinned._settle_drop(bar)
         pump(app.root)
         assert pinned.note["pin"], "dropping on a title bar must pin the note"
-        # The stored flag, not the window attribute: STICKYNOTE_TEST_NO_TOPMOST
+        # The stored flag, not the window attribute: STICKY_TEST_NO_TOPMOST
         # forces the attribute off, and that switch exists so the suite can be
         # run without covering the screen. Asserting on it would check the
         # harness rather than the note.

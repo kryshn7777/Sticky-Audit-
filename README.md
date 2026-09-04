@@ -1,8 +1,8 @@
-# Sticky Notes
+# Sticky
 
-A lightweight digital sticky-note surface for Windows. Notes live on the
-desktop as real windows, in a handwritten face on coloured paper, and they are
-still there after a reboot.
+**Your notes, stuck to your desktop.** Real windows on coloured paper, in a
+handwritten face, still there after a reboot - and a small crew who live on
+them, wander off along the taskbar, and get up to things while you work.
 
 Pure Python 3 and tkinter. **No dependencies, no build step, no network.**
 
@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Desktop
 Creates a Start Menu shortcut (and a Desktop one with `-Desktop`) pointing at
 `pythonw.exe`, carrying the note icon and the app's AppUserModelID.
 
-Then **pin it yourself**: Start → type *Sticky Notes* → right-click → *Pin to
+Then **pin it yourself**: Start → type *Sticky* → right-click → *Pin to
 taskbar*. Windows has blocked apps from pinning themselves since Windows 10
 1607; there is no honest way around it. Because the shortcut and the running
 process share an AppUserModelID, the app's windows collapse into that one
@@ -31,7 +31,7 @@ Remove everything with `install.ps1 -Uninstall` (your notes are left alone).
 ## Run without installing
 
 ```powershell
-pythonw stickynote.pyw
+pythonw sticky.pyw
 ```
 
 ---
@@ -53,7 +53,10 @@ pythonw stickynote.pyw
 | **Pick him up** | Press his face and drag. He comes off the note, thrashing, and falls wherever you drop him. Drop him on any note and he takes hold of it there. |
 | **Right-click him** | Once he is off the note: *Send him home*, or *Ask him to leave*. |
 | **Pin to an app** | Drag the note so its top edge lands on another window's title bar. A paperclip snaps on while you are still holding the note; let go and it travels with that window from then on. Drag it away, or *Unpin*, to take it off. |
-| **Right-click a note** | Edit, checkbox, colour, unpin, always-on-top, show mascot, new note, Move to Trash. |
+| **Right-click a note** | Edit, checkbox, colour, unpin, always-on-top, show mascot, *Sit with me*, *Earlier versions*, new note, Move to Trash. |
+| **Capture anywhere** | `Ctrl+Alt+N` from any application drops a new note under the pointer, ready to type into. |
+| **Go back a version** | *Earlier versions* on the right-click menu. The last six saves of that note are there, and putting one back is itself undoable. |
+| **Sit with me** | *Sit with me (25 min)* on the right-click menu. He comes off the note, lights a fire under it, and sits there until it burns out. |
 | **Resize by hand** | Drag the folded corner, or the right / bottom edge. That note stops auto-sizing from then on, and its content rewraps to the new shape. |
 
 ### Keyboard
@@ -68,6 +71,7 @@ pythonw stickynote.pyw
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+U` | bold / italic / underline |
 | `Ctrl+-` / `Ctrl+=` | smaller / larger text |
 | `Ctrl+Shift+K` | turn this line (or every selected line) into a checkbox |
+| `Ctrl+Alt+N` | new note under the pointer, from any application |
 | `Tab` | heading → content → OK |
 
 ---
@@ -85,7 +89,9 @@ leaves either the previous file or the new one, never a half-written one. The
 exposure is the ≤0.7 s of typing since the last flush.
 
 **Trash.** *Move to Trash* is reversible. Notes wait in the Trash tab until you
-*Restore* or *Delete* them, and permanent deletion asks first.
+*Restore* or *Delete* them, and permanent deletion asks first. A note in the
+bin takes its mascot with it: one you had dragged off it goes when it goes,
+rather than being left stood on the taskbar with nothing behind him.
 
 **Auto-sizing.** A note grows with what you write, up to 424 × 524 px, then the
 content scrolls instead of the note taking over the screen. Resizing by hand
@@ -124,13 +130,35 @@ windows hand focus back and forth between themselves, and every one of those
 was a full save plus a rebuild of the overview. It now writes only when there
 is actually something unsaved.
 
+**Quick capture.** `Ctrl+Alt+N` anywhere in Windows drops a note under the
+pointer with the caret already in it. The key itself costs no timer: a hotkey
+registered against the thread never arrives, because Tcl's own notifier drains
+that queue first (measured - posted by hand, one `update()`, gone), so Sticky
+owns a message-only window and Windows dispatches the key to its procedure
+through the loop the app is already running. That procedure sets a flag and
+returns - building a note inside a Windows callback inside Tcl's pump takes
+the process down with a GIL error - and the flag is read on the pointer
+tracker's existing tick, which holds itself to 250 ms while anything is riding
+on it. Turn it off in the overview; if another application already owns the
+combination, the box goes back to off rather than lying to you.
+
+**Earlier versions.** Every save keeps the text that was there before it, six
+deep (`HISTORY_MAX`), in the same JSON you can open in Notepad. *Earlier
+versions* on the right-click menu lists them with how long ago they were, and
+putting one back is itself just another save - so the version you replaced is
+one menu away too. Snapshots rather than diffs: a note is a few hundred bytes,
+and a diff you cannot read in Notepad is a diff you cannot trust.
+
 **Offline.** No sockets are opened, not even on loopback. Single-instance
 detection uses a named mutex and `FindWindowW`, not a local port.
 
 **Windows integration.** Per-monitor DPI v2, the overview follows the system
 light/dark setting including its title bar, and Windows text scaling is
-honoured. Data lives in `%APPDATA%\StickyNote\notes.json`, not next to the
-executable.
+honoured. Data lives in `%APPDATA%\Sticky\notes.json`, not next to the
+executable. It was called StickyNote before it was called Sticky, and anybody
+who already had notes keeps reading and writing `%APPDATA%\StickyNote` where
+they were written - a rename must not hand somebody an empty desk, and moving
+the file is the one way it could.
 
 **Handwriting.** Segoe Print: hand-lettered but upright and separated, so
 notes still read at a glance. Ink Free and Segoe Script are scrawls at this
@@ -167,8 +195,20 @@ a quarter of an hour, never twice about the same note inside fifteen minutes,
 and never while you are editing or already looking at it. Right-click any note
 and untick *Show mascot* to switch him off everywhere.
 
+**Ticking the last one.** Finish a list - the last empty box on a note goes
+from `[ ]` to `[x]` - and he hops, grins and says something about it, and
+anybody out on the taskbar within `APPLAUD_R` of that note leaves whatever
+they were doing, comes over, and makes a fuss with both hands over his head
+before going back to it. The man who came off that note joins in from wherever
+he is, because it is his note. It takes two counts rather than one question:
+there has to have been something left to do, there has to be nothing left now,
+and one more box has to be ticked than was before - without that last part,
+deleting the only line you had not done would read as having done it.
+
 He is not only furniture, either. Press his face and drag, and he comes off
-the note altogether - see **Picking him up**, below.
+the note altogether - see **Picking him up**, below. Nobody guesses that, so on
+the very first run - once, ever, and then never again on that machine - he says
+so himself.
 
 **Pinning a note to an app.** Drag a note so its own top edge lands on another
 application's title bar and it clips itself there: a paperclip snaps onto the
@@ -230,10 +270,25 @@ layered window of his own, while the crowd itself handles any number by
 breaking into groups. Drag the seventh and the drag moves his note instead,
 because a drag that does nothing at all reads as the note being broken.
 
-While you are carrying him he does not enjoy it: eyes screwed shut, mouth
-open, arms thrown up and down against each other, legs kicking, the whole of
-him shuddering - and turned towards the note he came from the entire time,
-leaning after it. A child being carried out of a room.
+Take hold of him and he is yanked up off the floor first: for `GRAB_S` he is
+stretched along the pull with his arms and legs trailing under him and a face
+that has not caught up, and only then does the thrashing start. After that he
+does not enjoy it: eyes screwed shut, mouth open, arms thrown up and down
+against each other, legs kicking, the whole of him shuddering - and turned
+towards the note he came from the entire time, leaning after it. A child being
+carried out of a room.
+
+He also trails the hand. How fast you are moving is measured off the same few
+frames the throw is measured from, smoothed, and fed into his lean, so he hangs
+back the way he came and swings past the hand when it stops. Without it he is
+the same pose whether he is carried gently across the desk or swung about,
+which is the one thing a dragged body must not look like.
+
+**Poking him.** Click without dragging - inside `TAP_S`, and having gone
+nowhere - and he is not thrown anywhere at all. He hops where he stands and
+gives you a look (`STARTLE_S`) that wears off the way the fright after the hut
+does. A click that flung him across the screen made him feel like a physics
+object; this makes him feel like somebody who was standing there.
 
 Let go and he falls, with weight. A flick throws him and sets him spinning;
 letting go still drops him straight down. He bounces once - twice reads as a
@@ -245,6 +300,28 @@ either side, hidden, or on a second screen with a bar of its own.
 Then he goes for a walk along it: a stretch, a stop to look around, another
 stretch. His eyes follow your pointer while he stands there. Leave him alone
 for two minutes and he dozes off, until the pointer comes near him again.
+
+**Something full-screen.** A video, a game, a slide deck, somebody's shared
+window: whatever is in front covers its whole monitor, and the crew clears off
+the bar rather than sitting on top of it. They walk off the nearer edge, their
+windows go away, the ball and the hut go with them, and when it is over they
+walk back in to where they were standing. The whole monitor rather than the
+work area, deliberately - a maximised window stops at the top of the taskbar,
+and a maximised window is somebody working rather than somebody presenting.
+Asked twice a second (`SHY_EVERY`) off the tick the crew is already running,
+because it is one `GetForegroundWindow` and one `GetWindowRect` for a thing
+that changes about once an hour.
+
+**Standing about.** A stop is not a freeze. Every few seconds of standing
+still (`IDLE_EVERY`) he does one of four things with the two seconds he has:
+both arms up in a stretch that takes him off his heels, a yawn behind one hand
+with his eyes shut, a scratch at the side of his head, or a look either way
+along the bar. They are solved against the same two-bone arms everything else
+uses rather than keyframed, which is why each one is four lines. An idle also
+buys him the full frame rate for as long as it runs and not a tick longer -
+standing about is otherwise 200 ms a frame, which is plenty for a blink and
+nowhere near enough for an arm going over his head. He finishes what he is
+doing before he walks off anywhere.
 
 **Holding on to a note.** Drop him on a sheet, or beside one, and he takes
 hold of it *where you dropped him*. Nothing snaps to a spot of its own: by the
@@ -297,12 +374,25 @@ the first conversation starts within about ten seconds.
 One who has just been laughed at is the exception - he wants nothing to do with
 anybody until the face has worn off, and walks off on his own until it has.
 
-**Three of them.** Three on the floor at once and they talk as three: one at a
-time, the other two turned to whoever is speaking, and the speaker working the
-room - one of them for the first half of what he is saying and the other for
-the second. It ends the way a two-way ends, and they go their separate ways.
+**What his hands do while he talks.** One gesture a sentence, settled on
+the frame the sentence begins and held for the whole of it: he waves, lays it
+out with both hands, counts it off, chops at it, points at whoever he is
+talking to, or shrugs. Each is a point the arm is solved to rather than a set
+of keyframes, which is why a sixth one is four lines. Chosen once per beat and
+kept on the scene rather than on him, so the listeners are watching the hand he
+is actually making - picked per frame it strobes, and picked once per
+conversation he makes the same shape three times running.
 
-That is when all three are standing there as it starts. Turn up to one already
+**Three of them, or four.** Three on the floor at once and they talk as three:
+one at a time, the others turned to whoever is speaking, and the speaker
+working the room - one of them for the first half of what he is saying and
+another for the second. It ends the way a two-way ends, and they go their
+separate ways. Four together is the same scene off a longer table (`TALK4`),
+and `MAX_CAST` is the ceiling: past four they are a row rather than a group,
+the two on the ends are too far apart to be looking at each other, and the
+last of them waits half a minute for a turn. A fifth stood nearby watches.
+
+That is when all of them are standing there as it starts. Turn up to one already
 running and you are outside it, and where you stop decides what happens next.
 
 Hang back and you watch. You follow whoever is talking, neither of them looks
@@ -334,7 +424,20 @@ come off a conversation at the same moment - one of them is held back, some of
 the time - and that is the whole supply of odd ones out. Everybody free at once
 is a three-way; somebody still cooling off is a pair with an audience.
 
-**Excusing yourself.** About a third of three-way conversations (`BOW_ODDS`)
+**Personal space.** Nobody stands inside anybody. Two of them closer than
+`SPACE_R` on the same floor shuffle apart by `SPACE_PUSH` a frame - half each
+when both are standing about, all of it from whichever one is. A man on his way
+somewhere is never shoved off his line: he makes the other one make room and
+carries on. Both of them giving way deadlocks an errand, because two of them
+walking the wood home from the same edge have to pass each other, and every
+shove moved the man in front further along until the one behind had chased him
+the length of the bar. It is one pass over the crew before they draw, for the
+same reason the pairing is decided in one place: each of them backing off on
+his own turns a crowd into everybody stepping into the space somebody else has
+just left.
+
+**Excusing yourself.** About a third of conversations with three or more in
+them (`BOW_ODDS`)
 are one of them leaving early. He waits for a gap rather than cutting anybody
 off - it fires on the frame the second speaker begins, and never on the man
 about to speak, because talking over somebody is what the mocking is for and
@@ -353,30 +456,66 @@ rather than appointed at the start, so possession turns over the instant
 somebody else is closer - and two of them converging on a loose ball is the
 whole game. He boots it at one of the others rather than at nowhere, and only
 while it is coming down: allowed to kick it on the way up he re-boots the same
-ball four frames running and it leaves the screen. The three odds are one roll
-cut three ways rather than a roll each, because chaining independent odds makes
+ball four frames running and it leaves the screen. The four odds are one roll
+cut four ways rather than a roll each, because chaining independent odds makes
 whatever is last on the list far rarer than its number reads.
 
-**Wood, and a hut.** A fifth of the time (`BUILD_ODDS`), if there are three of
-them and nothing built yet, they agree on a hut instead. Each trots off to the
+**A fire, and an evening.** A fifth of the time (`FIRE_ODDS`), if there are
+three or more of them and nothing already burning, they light a campfire. They
+walk to a place round it - sides alternating, so three of them read as a ring
+rather than as a queue, and handed out left to right so nobody crosses the
+flame to reach one - sit down into it, and talk across it while it burns: hips
+on the floor, feet out in front, the two-bone legs folding into the sit rather
+than shrinking into it. Then it goes out. They watch it go (`dim`), get up,
+all of them wave and say bye, and they walk off in different directions. The
+fire is lit with exactly as long in it as the table takes to reach the beat
+they stand up on, so it dies under them rather than at some time of its own -
+retiming a beat cannot leave them sat in the dark or walking away from a fire
+still going. The flame itself is two polygons whose outline moves on two
+waves that never come back into step, and the last `EMBER_S` of it is a glow
+going down rather than a flame going out in one frame.
+
+**Sit with me.** *Sit with me (25 min)* on a note's right-click menu, and
+whoever belongs to that note comes off the paper, walks underneath it, lights a
+fire and sits down by it. The fire is the timer: no countdown, no bar, no
+notification - you glance at the taskbar and see how much of it is left. When
+it burns out he stands up, waves, and goes back to the note. Right-click the
+fire for *Put it out* and the same ending happens early.
+
+That fire needed the yard to be told the time as well as the frame. Everything
+down there is stepped with the crew's own `dt`, which is clamped by `MAX_STEP`
+so a stalled event loop cannot teleport anybody - and a man sitting still ticks
+five times a second, so twenty-five minutes of fire burned on clamped frames
+would have taken a hundred. `step` takes both now: the frame for the physics,
+the real gap for anything with a life on it.
+
+**Wood, and a hut.** A fifth of the time (`BUILD_ODDS`), if there are three or
+more of them and nothing built yet, they agree on a hut instead. Each trots off to the
 nearer edge of the screen and keeps going until he is out of it - he is not
 hidden and nothing is switched off, he has simply walked past the end of his
 own window, which is the size of the screen and does not follow him. A moment
 later he is back with a plank held out in front of him, and when the last of
-the three is home the hut goes up between them and they file in through the
-door. `FETCH_SPEED` is the knob if the errand drags on a very wide screen, and
+them is home the hut goes up between them and they file in through the door -
+and so does anybody else left standing on that floor with nothing on, wood or
+no wood. One of them outside a hut everybody else is in reads as having been
+forgotten. `FETCH_SPEED` is the knob if the errand drags on a very wide screen, and
 `FETCH_MAX_S` is the give-up: a man who has been out there a minute has had
 something go wrong with the floor and comes to his senses rather than standing
 off the edge for ever. The scene stays on him for the whole errand, so a hand
-closing on any one of the three still tears the build down the way it breaks up
+closing on any one of them still tears the build down the way it breaks up
 a conversation - and whoever comes home with the wood to find nobody there puts
 it down and goes back to what he was doing. Indoors he is a withdrawn window
 with a time on it, ticking at the dozing rate and drawing nothing.
 
-**Knocking it down.** Right-click the hut and it is gone. No menu: a roamer has
-one because *Send him home* and *Ask him to leave* are two different things and
-one of them is final, and there is only ever one thing to do to a hut.
-Everybody who was inside comes out where it stood, and so does anybody within
+**Knocking it down.** Right-click the hut and it asks first: *Knock it down*
+or *Leave it standing*. It used to go on the click itself, and it is the one
+thing down there that cannot be undone - they spend the best part of a minute
+walking off the screen for the wood - so a right-click that pulled it over with
+no warning was a right-click nobody dared use twice. What it leaves is a wreck:
+`WRECK_N` planks lying where it stood, each with its own few seconds on it
+(`WRECK_S`), shrinking away over the last third of that rather than fading,
+because the window is keyed transparent and there is no background to fade
+into. Everybody who was inside comes out where it stood, and so does anybody within
 `WATCH_R` on the same floor who was near enough to have watched it happen -
 which is the difference between a hut falling over and a hut being kicked in.
 They run back and forth for `PANIC_S` rather than off: away is a stomp, and he
@@ -472,7 +611,7 @@ there is no timer at all, `roamer.crew` is empty, and `test_app.py` asserts
 both. One timer serves however many are out there - not one each - and it runs
 at the slowest rate any of them needs: 500 ms asleep, 200 ms standing about,
 60 ms hanging off a note, and a frame every 16 ms only while something is
-actually moving. Three at once is the ceiling.
+actually moving. `MAX_ROAMERS` is the ceiling on how many are out at once.
 
 Measured over 15 s of a real event loop with two notes open, reading the
 process own CPU time either side: nobody out there, 0.2-0.5% of one core -
@@ -500,7 +639,7 @@ replaced. `test_app.py` throws him and asserts the window never moved.
 
 | | |
 |---|---|
-| `stickynote.pyw` | entry point: DPI, app identity, single instance, wiring |
+| `sticky.pyw` | entry point: DPI, app identity, single instance, wiring |
 | `note.py` | the note window — paper, drag, edit, autosize, checkboxes, undo toast |
 | `mascot.py` | the box man, his poses, the colour flip, the pointer tracker, the speech bubble |
 | `roamer.py` | the same box man off the note: his own window, the physics, and what he does out there |

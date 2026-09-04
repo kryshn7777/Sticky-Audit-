@@ -76,7 +76,7 @@ class Board(tk.Toplevel):
         t = self.theme
         top = tk.Frame(self, bg=t["bg"], padx=16, pady=14)
         top.pack(fill="x")
-        tk.Label(top, text="Sticky Notes", bg=t["bg"], fg=t["fg"],
+        tk.Label(top, text="Sticky", bg=t["bg"], fg=t["fg"],
                  font=self.f_title).pack(side="left")
 
         self.swatches = {}
@@ -102,6 +102,27 @@ class Board(tk.Toplevel):
         self.tab_notes = self._tab(tabs, "Notes", "notes")
         self.tab_trash = self._tab(tabs, "Trash", "trash")
 
+        # Kept across a tab switch on purpose: "where did I put that" is a
+        # question you ask the Notes tab and then the Trash.
+        find = tk.Frame(self, bg=t["bg"], padx=16)
+        find.pack(fill="x", pady=(8, 0))
+        self.var_find = tk.StringVar()
+        self.entry_find = tk.Entry(find, textvariable=self.var_find,
+                                   font=self.f_ui, bd=0, relief="flat",
+                                   bg=t["card"], fg=t["fg"],
+                                   insertbackground=t["fg"],
+                                   highlightthickness=1,
+                                   highlightbackground=t["line"],
+                                   highlightcolor=t["accent"])
+        self.entry_find.pack(side="left", fill="x", expand=True, ipady=4, ipadx=8)
+        self.btn_clear_find = tk.Button(
+            find, text="x", font=self.f_ui, bd=0, relief="flat", cursor="hand2",
+            padx=8, bg=t["bg"], fg=t["dim"], activebackground=t["hover"],
+            activeforeground=t["fg"], command=self._clear_find)
+        self.var_find.trace_add("write", lambda *_: self.refresh())
+        self.entry_find.bind("<Escape>", lambda e: self._clear_find())
+        self._find_hint()
+
         wrap = tk.Frame(self, bg=t["line"], padx=1, pady=1)
         wrap.pack(fill="both", expand=True, padx=16, pady=(10, 8))
         self.canvas = tk.Canvas(wrap, bg=t["bg"], highlightthickness=0, bd=0)
@@ -121,6 +142,14 @@ class Board(tk.Toplevel):
         foot = tk.Frame(self, bg=t["bg"], padx=16)
         foot.pack(fill="x", pady=(0, 12))
         self.var_top = tk.BooleanVar(value=self.app.store.settings["always_on_top"])
+        self.var_capture = tk.BooleanVar(
+            value=self.app.store.settings.get("quick_capture", True))
+        tk.Checkbutton(foot, text="Quick capture  (Ctrl+Alt+N)",
+                       variable=self.var_capture, command=self._menu_capture,
+                       font=self.f_ui, bg=t["bg"], fg=t["dim"],
+                       selectcolor=t["card"], activebackground=t["bg"],
+                       activeforeground=t["fg"], bd=0, highlightthickness=0,
+                       cursor="hand2", anchor="w").pack(fill="x")
         tk.Checkbutton(foot, text="Always on top", variable=self.var_top,
                        command=self._toggle_top, font=self.f_ui,
                        bg=t["bg"], fg=t["dim"], selectcolor=t["card"],
@@ -148,6 +177,11 @@ class Board(tk.Toplevel):
                   cursor="hand2", padx=10, bg=t["bg"], fg=t["dim"],
                   activebackground=t["hover"], activeforeground=t["fg"],
                   command=self.app.quit_app).pack(anchor="e", pady=(6, 0))
+
+    def _menu_capture(self):
+        """Windows may refuse the combination. If it does, the box goes back
+        rather than sitting there ticked over a hotkey that does nothing."""
+        self.var_capture.set(self.app.set_quick_capture(self.var_capture.get()))
 
     def _tab(self, parent, label, key):
         t = self.theme
@@ -209,29 +243,75 @@ class Board(tk.Toplevel):
                             outline=self.theme["fg"] if selected else colors["edge"],
                             width=2 if selected else 1)
 
+    def looking_for(self):
+        """What is in the search box, as words. Empty when there is nothing."""
+        try:
+            return self.var_find.get().lower().split()
+        except (tk.TclError, AttributeError):
+            return []
+
+    @staticmethod
+    def matches(note, words):
+        """Every word somewhere in the heading or the body.
+
+        Every word rather than any: two words typed into a search box are a
+        narrowing, and a search that widens as you type is a search you stop
+        trusting on the second word.
+        """
+        if not words:
+            return True
+        hay = (note.get("heading", "") + " " + note.get("body", "")).lower()
+        return all(word in hay for word in words)
+
+    def _clear_find(self):
+        self.var_find.set("")
+        self._find_hint()
+        return "break"
+
+    def _find_hint(self):
+        """The clear button is only there when there is something to clear."""
+        if self.var_find.get():
+            self.btn_clear_find.pack(side="left")
+        else:
+            self.btn_clear_find.pack_forget()
+
     def refresh(self):
         t = self.theme
         self._draw_swatches()
+        self._find_hint()
+        words = self.looking_for()
         for tab, key in ((self.tab_notes, "notes"), (self.tab_trash, "trash")):
             active = self.view == key
-            count = len(self.app.store.notes if key == "notes" else self.app.store.trash)
+            all_of_them = (self.app.store.notes if key == "notes"
+                           else self.app.store.trash)
+            count = len(all_of_them)
+            if words:
+                # Both numbers while a search is on: "3" on its own next to a
+                # filtered list reads as three notes left in the world.
+                found = sum(1 for n in all_of_them if self.matches(n, words))
+                label = "  %d/%d" % (found, count) if count else ""
+            else:
+                label = "  %d" % count if count else ""
             tab.configure(fg=t["fg"] if active else t["dim"],
-                          text=("Notes" if key == "notes" else "Trash") +
-                               ("  %d" % count if count else ""))
+                          text=("Notes" if key == "notes" else "Trash") + label)
         for child in self.list.winfo_children():
             child.destroy()
 
-        rows = self.app.store.notes if self.view == "notes" else self.app.store.trash
+        every = self.app.store.notes if self.view == "notes" else self.app.store.trash
+        rows = [note for note in every if self.matches(note, words)]
         if not rows:
-            empty = ("No notes yet. Press New note to start one."
-                     if self.view == "notes" else
-                     "Trash is empty. Deleted notes wait here until you clear them.")
+            if words:
+                empty = "Nothing here says %s." % " ".join(words)
+            else:
+                empty = ("No notes yet. Press New note to start one."
+                         if self.view == "notes" else
+                         "Trash is empty. Deleted notes wait here until you clear them.")
             tk.Label(self.list, text=empty, bg=t["bg"], fg=t["dim"], font=self.f_ui,
                      wraplength=300, justify="left", padx=14, pady=24).pack(fill="x")
         else:
             for note in rows:
                 self._row(note)
-        if self.view == "trash" and rows:
+        if self.view == "trash" and rows and not words:
             tk.Button(self.list, text="Empty Trash", font=self.f_ui, bd=0, relief="flat",
                       cursor="hand2", bg=t["bg"], fg=t["dim"], activeforeground=t["fg"],
                       activebackground=t["hover"],

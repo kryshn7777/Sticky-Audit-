@@ -1,8 +1,8 @@
-"""Sticky Notes - a lightweight paper surface that behaves like a Windows app.
+"""Sticky - a lightweight paper surface that behaves like a Windows app.
 
 Launch with pythonw.exe so no console window appears:
 
-    pythonw stickynote.pyw
+    pythonw sticky.pyw
 
 One process owns every note window and the overview. It sits in Tk's event
 loop doing nothing at all until you touch something: no polling, no threads,
@@ -30,12 +30,15 @@ import store                      # noqa: E402
 from board import Board           # noqa: E402
 from note import NoteWindow, Toast  # noqa: E402
 
-ICON = winkit.resource_path("assets", "stickynote.ico")
+ICON = winkit.resource_path("assets", "sticky.ico")
 
 # How often the mascot is even allowed to consider speaking. One timer for the
 # whole app, a coin flip when it fires, and a long cooldown per note: that
 # works out at a line every quarter of an hour or so, and never the same note
 # twice in fifteen minutes.
+HELLO_MS = 2600          # long enough to have looked at the note first
+CAPTURE_W, CAPTURE_H = 260, 200   # room kept for a captured note on screen
+
 NAG_EVERY_MS = 210000
 NAG_CHANCE = 0.25
 NAG_COOLDOWN_S = 900
@@ -62,6 +65,18 @@ class App:
         self._nagged = {}
         self._nag_job = None
 
+        # Ctrl+Alt+N from anywhere. Off again the moment Windows says no:
+        # the combination may already belong to somebody else, and an app that
+        # will not start over a hotkey is worse than one without a hotkey.
+        self.hotkey = winkit.Hotkey()
+        if self.store.settings.get("quick_capture", True):
+            # The setting is what you asked for, not what Windows said today.
+            # Somebody else may hold Ctrl+Alt+N this morning and not this
+            # afternoon, and writing the refusal into the settings turned the
+            # feature off for good over a temporary no.
+            if self.hotkey.register():
+                self.tracker.also = self._check_hotkey
+
         self.board = Board(self)
         self.board.title(winkit.BOARD_TITLE)
 
@@ -76,6 +91,9 @@ class App:
             self.new_note()
         self.board.show()
         self._schedule_nag()
+        self._hello_job = None
+        if not self.store.settings.get("said_hello"):
+            self._hello_job = self.root.after(HELLO_MS, self._hello)
 
         atexit.register(self._save_quietly)
 
@@ -94,14 +112,64 @@ class App:
         self.windows[note["id"]] = window
         return window
 
-    def new_note(self, color=store.DEFAULT_COLOR):
-        note = self.store.add(color)
+    def new_note(self, color=store.DEFAULT_COLOR, at=None):
+        note = self.store.add(color, *(at if at is not None else (None, None)))
         note["topmost"] = self.store.settings["always_on_top"]
         window = self._open(note)
         window.raise_note()
         window.start_edit()
         self.refresh_board()
         return window
+
+    def _check_hotkey(self):
+        """Was Ctrl+Alt+N pressed? Asked on the tracker's tick.
+
+        The key itself arrives without a timer - Windows dispatches it to our
+        own window procedure through the loop Tk is already running - but a
+        window procedure may only set a flag, and reading that flag is what
+        this is. No timer of its own: the tracker is already ticking, and it
+        holds itself to ALSO_MS while anybody is riding on it.
+        """
+        if self.hotkey.take():
+            self.capture_note()
+
+    def capture_note(self):
+        """The hotkey. A note at the pointer, ready to type into.
+
+        Where the pointer is rather than where the cascade was up to: the
+        whole point of a key you press without looking is that you are already
+        looking somewhere, and the note has to arrive there.
+        """
+        at = None
+        try:
+            px, py = self.root.winfo_pointerxy()
+        except tk.TclError:
+            px = py = None
+        if px is not None:
+            area = winkit.work_area(px, py)
+            if area is None:
+                area = (0, 0, self.root.winfo_screenwidth(),
+                        self.root.winfo_screenheight())
+            # Placed under the pointer, and kept far enough inside the work
+            # area that the whole sheet is on the screen it was asked for.
+            at = (int(min(max(px - 24, area[0] + 8), area[2] - CAPTURE_W)),
+                  int(min(max(py - 18, area[1] + 8), area[3] - CAPTURE_H)))
+        window = self.new_note(at=at)
+        window.raise_note()
+        return window
+
+    def set_quick_capture(self, enabled):
+        """Turn the hotkey on or off. Returns what actually happened."""
+        if enabled:
+            self.store.settings["quick_capture"] = bool(self.hotkey.register())
+            self.tracker.also = (self._check_hotkey
+                                 if self.store.settings["quick_capture"] else None)
+        else:
+            self.hotkey.unregister()
+            self.store.settings["quick_capture"] = False
+            self.tracker.also = None
+        self.store.save()
+        return self.store.settings["quick_capture"]
 
     def show_note(self, note_id, edit=False):
         window = self.windows.get(note_id)
@@ -217,6 +285,40 @@ class App:
 
     # ------------------------------------------------------------- the mascot
 
+    def _hello(self):
+        """The first thing he ever says, and the only time he says it.
+
+        The flag is written whether or not the bubble went up. A man who was
+        switched off, or a note that has already been closed, is not a reason
+        to keep trying every launch until it lands: this is a hello, not a
+        thing to be nagged with.
+        """
+        self._hello_job = None
+        if self.store.settings.get("said_hello"):
+            return              # once means once, however it is called
+        self.store.settings["said_hello"] = True
+        self._save_quietly()
+        if not self.store.settings.get("mascot", True):
+            return
+        for window in self.windows.values():
+            try:
+                if window.mascot.visible() and window.mascot.say(mascot.HELLO_LINE):
+                    return
+            except tk.TclError:
+                continue
+
+    def _cancel_jobs(self):
+        """Every after() this app owns, called off."""
+        for name in ("_nag_job", "_hello_job"):
+            job = getattr(self, name, None)
+            if job is None:
+                continue
+            try:
+                self.root.after_cancel(job)
+            except (tk.TclError, ValueError):
+                pass
+            setattr(self, name, None)
+
     def _schedule_nag(self):
         self._nag_job = self.root.after(NAG_EVERY_MS, self._nag)
 
@@ -244,16 +346,33 @@ class App:
     # -------------------------------------------------------------------- life
 
     def quit_app(self):
-        # Everyone back on their notes first. An overlay outliving the root
-        # is how you get Tk's "invalid command name" on the way out.
+        # Every timer first, before anything slow. Taking the crew down and
+        # stopping the tracker is real work, and a timer that comes due in the
+        # middle of it fires into a half-dismantled app - which is Tk's
+        # "invalid command name" on the way out, printed at the user.
+        self._cancel_jobs()
+        # Everyone back on their notes. An overlay outliving the root is the
+        # same error from the other end.
         roamer.shutdown()
+        self.hotkey.close()
         self.tracker.stop()
-        if self._nag_job is not None:
+        # A speech bubble is a window with a timer to close itself. Destroying
+        # the root takes the window without running any of this file's code,
+        # and the timer then fires into a command that has gone - which Tk
+        # prints. Nothing else notices, and it is still ours to tidy up.
+        for window in list(self.windows.values()):
             try:
-                self.root.after_cancel(self._nag_job)
-            except (tk.TclError, ValueError):
+                window.mascot.hush()
+            except (tk.TclError, AttributeError):
                 pass
-            self._nag_job = None
+        # An Undo toast is the same shape of thing: a window with a timer to
+        # close itself, and nobody left to run it.
+        if self.toast is not None:
+            try:
+                self.toast.close()
+            except tk.TclError:
+                pass
+            self.toast = None
         for window in list(self.windows.values()):
             try:
                 window.flush()

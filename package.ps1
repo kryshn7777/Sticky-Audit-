@@ -1,17 +1,17 @@
 <#
-    Sticky Notes - package the build as an MSIX for the Microsoft Store.
+    Sticky - package the build as an MSIX for the Microsoft Store.
 
-    Run build.ps1 first. This takes dist\StickyNote, drops the manifest and the
-    Store tiles beside it, and produces dist\StickyNote.msix ready to upload.
+    Run build.ps1 first. This takes dist\Sticky, drops the manifest and the
+    Store tiles beside it, and produces dist\Sticky.msix ready to upload.
 
     You need three values from Partner Center. Reserve your app name first,
     then read them off Product > Product identity:
 
         powershell -ExecutionPolicy Bypass -File package.ps1 `
-            -IdentityName    "12345YourPublisher.StickyNotesPaper" `
+            -IdentityName    "12345YourPublisher.StickyPaper" `
             -Publisher       "CN=A1B2C3D4-0000-0000-0000-123456789ABC" `
             -PublisherDisplay "Your Publisher Name" `
-            -DisplayName     "Sticky Notes Paper" `
+            -DisplayName     "Sticky Paper" `
             -Version         "1.0.0.0"
 
     Do NOT sign the package yourself for a Store submission - Microsoft signs
@@ -28,18 +28,18 @@ param(
     [Parameter(Mandatory = $true)][string]$IdentityName,
     [Parameter(Mandatory = $true)][string]$Publisher,
     [Parameter(Mandatory = $true)][string]$PublisherDisplay,
-    [string]$DisplayName = "Sticky Notes",
+    [string]$DisplayName = "Sticky",
     [string]$Version = "1.0.0.0",
     [switch]$SelfSign
 )
 
 $ErrorActionPreference = 'Continue'
 $Root = $PSScriptRoot
-$Build = Join-Path $Root 'dist\StickyNote'
+$Build = Join-Path $Root 'dist\Sticky'
 $Stage = Join-Path $Root 'dist\msix'
-$Msix = Join-Path $Root 'dist\StickyNote.msix'
+$Msix = Join-Path $Root 'dist\Sticky.msix'
 
-if (-not (Test-Path (Join-Path $Build 'StickyNote.exe'))) {
+if (-not (Test-Path (Join-Path $Build 'Sticky.exe'))) {
     throw "No build found at $Build. Run build.ps1 first."
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
@@ -121,7 +121,7 @@ if ($SelfSign) {
 
     Write-Host 'Creating a throwaway local certificate...'
     $cert = New-SelfSignedCertificate -Type Custom -Subject $Publisher `
-        -KeyUsage DigitalSignature -FriendlyName 'StickyNote local test' `
+        -KeyUsage DigitalSignature -FriendlyName 'Sticky local test' `
         -CertStoreLocation 'Cert:\CurrentUser\My' `
         -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
     $pfx = Join-Path $Root 'dist\localtest.pfx'

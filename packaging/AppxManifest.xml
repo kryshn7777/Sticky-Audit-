@@ -7,7 +7,7 @@
   three under Product > Product identity once you have reserved the name.
   package.ps1 substitutes them, so do not edit them by hand:
 
-    __IDENTITY_NAME__       e.g. 12345YourPublisher.StickyNotesPaper
+    __IDENTITY_NAME__       e.g. 12345YourPublisher.StickyPaper
     __PUBLISHER__           e.g. CN=A1B2C3D4-0000-0000-0000-123456789ABC
     __PUBLISHER_DISPLAY__   your publisher display name
 
@@ -33,7 +33,7 @@
     <DisplayName>__DISPLAY_NAME__</DisplayName>
     <PublisherDisplayName>__PUBLISHER_DISPLAY__</PublisherDisplayName>
     <Logo>Images\StoreLogo.png</Logo>
-    <Description>Sticky notes that live on your desktop and stay there. Offline, no account, near-zero resource use.</Description>
+    <Description>Your notes, stuck to your desktop. Real windows on coloured paper that are still there after a reboot - offline, no account, near-zero resource use.</Description>
   </Properties>
 
   <Dependencies>
@@ -47,11 +47,11 @@
   </Resources>
 
   <Applications>
-    <Application Id="StickyNote" Executable="StickyNote.exe"
+    <Application Id="Sticky" Executable="Sticky.exe"
                  EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="__DISPLAY_NAME__"
-        Description="Sticky notes that live on your desktop and stay there."
+        Description="Your notes, stuck to your desktop."
         BackgroundColor="transparent"
         Square150x150Logo="Images\Square150x150Logo.png"
         Square44x44Logo="Images\Square44x44Logo.png">
@@ -71,9 +71,9 @@
           certification expects, rather than an app that starts itself.
         -->
         <uap5:Extension Category="windows.startupTask"
-                        Executable="StickyNote.exe"
+                        Executable="Sticky.exe"
                         EntryPoint="Windows.FullTrustApplication">
-          <uap5:StartupTask TaskId="StickyNoteStartup" Enabled="false"
+          <uap5:StartupTask TaskId="StickyStartup" Enabled="false"
                             DisplayName="__DISPLAY_NAME__" />
         </uap5:Extension>
       </Extensions>

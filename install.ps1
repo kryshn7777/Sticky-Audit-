@@ -1,5 +1,5 @@
 <#
-    Sticky Notes - shortcut installer.
+    Sticky - shortcut installer.
 
     Creates a Start Menu shortcut (and optionally a Desktop one) that launches
     the app with pythonw.exe, carries the note icon, and declares the same
@@ -23,11 +23,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$AppName   = 'Sticky Notes'
-$AppId     = 'Claude.StickyNote'
+$AppName   = 'Sticky'
+$AppId     = 'Claude.Sticky'
 $Root      = $PSScriptRoot
-$Launcher  = Join-Path $Root 'stickynote.pyw'
-$IconPath  = Join-Path $Root 'assets\stickynote.ico'
+$Launcher  = Join-Path $Root 'sticky.pyw'
+$IconPath  = Join-Path $Root 'assets\sticky.ico'
 $StartMenu = Join-Path ([Environment]::GetFolderPath('Programs')) "$AppName.lnk"
 $DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "$AppName.lnk"
 
@@ -41,26 +41,26 @@ if ($Uninstall) {
         }
     }
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    if ((Get-ItemProperty -Path $runKey -Name 'StickyNote' -ErrorAction SilentlyContinue)) {
-        Remove-ItemProperty -Path $runKey -Name 'StickyNote'
+    if ((Get-ItemProperty -Path $runKey -Name 'Sticky' -ErrorAction SilentlyContinue)) {
+        Remove-ItemProperty -Path $runKey -Name 'Sticky'
         Write-Host 'removed the start-with-Windows entry'
     }
     Write-Host ''
     Write-Host 'Shortcuts removed. Your notes are untouched, in:'
-    Write-Host "  $env:APPDATA\StickyNote\notes.json"
+    Write-Host "  $env:APPDATA\Sticky\notes.json"
     Write-Host 'If the app was pinned, right-click the taskbar icon and unpin it.'
     return
 }
 
 # ------------------------------------------------------------------ checks
 
-if (-not (Test-Path $Launcher) -and -not (Test-Path (Join-Path $Root 'StickyNote.exe'))) {
-    throw "Neither StickyNote.exe nor stickynote.pyw found in $Root"
+if (-not (Test-Path $Launcher) -and -not (Test-Path (Join-Path $Root 'Sticky.exe'))) {
+    throw "Neither Sticky.exe nor sticky.pyw found in $Root"
 }
 
 # A packaged build is its own executable. Only fall back to hunting for a
 # Python interpreter when running from source.
-$FrozenExe = Join-Path $Root 'StickyNote.exe'
+$FrozenExe = Join-Path $Root 'Sticky.exe'
 if (Test-Path $FrozenExe) {
     $Target = $FrozenExe
     $Arguments = ''
@@ -178,7 +178,7 @@ function New-StickyShortcut([string]$Path) {
     $lnk.Arguments = $Arguments
     $lnk.WorkingDirectory = $Root
     if (Test-Path $IconPath) { $lnk.IconLocation = "$IconPath,0" } else { $lnk.IconLocation = "$Target,0" }
-    $lnk.Description = 'Sticky Notes on your desktop'
+    $lnk.Description = 'Your notes, stuck to your desktop.'
     $lnk.Save()
     [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
     [ShortcutAppId]::Apply($Path, $AppId)
@@ -194,11 +194,11 @@ Write-Host ''
 Write-Host 'To pin it to the taskbar (Windows has not allowed apps to pin themselves'
 Write-Host 'since Windows 10 1607, so this last step is yours):'
 Write-Host ''
-Write-Host '  1. Press Start and type: Sticky Notes'
+Write-Host '  1. Press Start and type: Sticky'
 Write-Host '  2. Right-click the result and choose Pin to taskbar.'
 Write-Host ''
 Write-Host 'Or launch it first, then right-click its taskbar button and pin that.'
 Write-Host 'Clicking the pinned icon afterwards reopens the overview window; it'
 Write-Host 'never starts a second copy.'
 Write-Host ''
-Write-Host "Notes are stored in $env:APPDATA\StickyNote\notes.json"
+Write-Host "Notes are stored in $env:APPDATA\Sticky\notes.json"

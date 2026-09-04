@@ -1,6 +1,6 @@
-"""Crash-safe local persistence for Sticky Notes.
+"""Crash-safe local persistence for Sticky.
 
-One JSON document under %APPDATA%/StickyNote/notes.json. Every write is
+One JSON document under %APPDATA%/Sticky/notes.json. Every write is
 atomic (temp file -> fsync -> os.replace), so a power cut or forced shutdown
 can never leave a half-written file behind: the reader either sees the old
 document or the new one, never a torn one.
@@ -13,7 +13,20 @@ import os
 import time
 import uuid
 
-APP_NAME = "StickyNote"
+# Six saved versions of a note, which is the current one and five to go back
+# to. Snapshots rather than diffs: a note is a few hundred bytes, the whole
+# point of this file is that it can be read in Notepad, and a diff you cannot
+# read is a diff you cannot trust.
+HISTORY_MAX = 6
+# ...and no two of them closer together than this. Autosave lands 0.7 s after
+# you stop typing, so without a gap the six versions are the last six pauses -
+# six snapshots of the same minute, and this morning's text pushed out by
+# lunchtime. Inside the gap the newest version is rewritten rather than a new
+# one added, so what is kept spans hours instead of seconds.
+HISTORY_GAP = 120.0
+
+APP_NAME = "Sticky"
+LEGACY_NAME = "StickyNote"    # what the folder was called before the rename
 SCHEMA_VERSION = 1
 
 # Paper colours. `ink` is checked against `paper` for >= 4.5:1 contrast by
@@ -32,6 +45,8 @@ DEFAULT_SETTINGS = {
     "run_at_startup": False,
     "mascot": True,          # the stickman behind the sheet
     "next_offset": 0,        # cascades new notes so they don't stack exactly
+    "said_hello": False,     # he introduces himself once, on the first run
+    "quick_capture": True,   # Ctrl+Alt+N drops a note wherever the pointer is
 }
 
 
@@ -65,9 +80,20 @@ def blend(a, b, u):
 
 
 def data_dir():
-    """Windows user-data location, created on demand."""
+    """Windows user-data location, created on demand.
+
+    It was called StickyNote before it was called Sticky. Anybody who already
+    has notes keeps them where they were written rather than being handed an
+    empty desk by a rename: the old folder wins if it is there, and only a
+    fresh install ever sees the new one. Nothing is copied anywhere, because a
+    copy that fails half way through is the one way a rename costs somebody
+    their notes.
+    """
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     path = os.path.join(base, APP_NAME)
+    older = os.path.join(base, LEGACY_NAME)
+    if not os.path.isdir(path) and os.path.isdir(older):
+        return older
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -89,6 +115,49 @@ def _coerce_pin(raw):
         return None
 
 
+def remember(note):
+    """Keep this version of the note, if it is not the one already kept.
+
+    Called on the way to disk rather than on every keystroke: a version per
+    letter typed is not a history, it is a keylogger with a cap on it. Notes
+    that have not changed cost one string comparison and add nothing.
+    """
+    past = note.setdefault("history", [])
+    text = (note.get("heading", ""), note.get("body", ""))
+    last = past[-1] if past else None
+    now = time.time()
+    if isinstance(last, dict):
+        if (last.get("heading", ""), last.get("body", "")) == text:
+            return False
+        if now - float(last.get("t", 0.0) or 0.0) < HISTORY_GAP:
+            # Still the same sitting. Keep where it has got to rather than
+            # adding another version of the same minute.
+            last["t"], last["heading"], last["body"] = now, text[0], text[1]
+            return True
+    past.append({"t": now, "heading": text[0], "body": text[1]})
+    del past[:-HISTORY_MAX]
+    return True
+
+
+def _coerce_history(raw):
+    """Past versions from disk, or none. Anything malformed is simply not a
+    version - a hand-edited file must not cost somebody the note itself."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[-HISTORY_MAX:]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            when = float(item.get("t", 0.0))
+        except (TypeError, ValueError):
+            when = 0.0
+        out.append({"t": when,
+                    "heading": str(item.get("heading", "")),
+                    "body": str(item.get("body", ""))})
+    return out
+
+
 def new_note(color=DEFAULT_COLOR, x=140, y=140):
     now = time.time()
     return {
@@ -102,6 +171,9 @@ def new_note(color=DEFAULT_COLOR, x=140, y=140):
         "auto_size": True,
         "font_size": 12,
         "marks": [],
+        # Past versions of the text, oldest first, newest last. The last entry
+        # is what is on the note now.
+        "history": [],
         # Clipped to another application's window, or None. The handle itself
         # does not survive a restart, so what is stored is the title on the
         # bar plus the offset from that window's top-left corner.
@@ -151,6 +223,8 @@ class Store:
 
     def save(self):
         """Atomic write. Safe to call as often as you like."""
+        for note in self.notes:
+            remember(note)
         doc = {
             "version": SCHEMA_VERSION,
             "notes": self.notes,
@@ -178,6 +252,7 @@ class Store:
             except (TypeError, ValueError):
                 note[key] = new_note()[key]
         note["pin"] = _coerce_pin(raw.get("pin"))
+        note["history"] = _coerce_history(raw.get("history"))
         note["heading"] = str(note["heading"])
         note["body"] = str(note["body"])
         note["topmost"] = bool(note["topmost"])

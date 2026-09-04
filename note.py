@@ -120,6 +120,18 @@ class Toast(tk.Toplevel):
             pass
 
 
+def _when(stamp):
+    """A saved version's age, short enough for a menu line."""
+    gap = max(0.0, time.time() - float(stamp or 0.0))
+    if gap < 90:
+        return "just now"
+    if gap < 5400:
+        return "%d min ago" % (gap // 60)
+    if gap < 172800:
+        return "%d hr ago" % (gap // 3600)
+    return "%d days ago" % (gap // 86400)
+
+
 class NoteWindow(tk.Toplevel):
     def __init__(self, app, note):
         tk.Toplevel.__init__(self, app.root)
@@ -261,6 +273,13 @@ class NoteWindow(tk.Toplevel):
         return getattr(self.app, "tracker", None)
 
     def destroy(self):
+        # A bubble is a child of this window with a timer of its own to close
+        # itself. Destroyed with its parent, that timer fires into a command
+        # that no longer exists, and Tk prints it at whoever is watching.
+        try:
+            self.mascot.hush()
+        except (tk.TclError, AttributeError):
+            pass
         tracker = self._tracker()
         if tracker is not None:
             tracker.unregister(self.mascot)
@@ -268,10 +287,11 @@ class NoteWindow(tk.Toplevel):
         self._cancel_clip()
         guy = roamer.for_note(self.note["id"])
         if guy is not None:
-            # His note has gone in the bin. He carries on living out there
-            # rather than winking out with it; he simply has nowhere left to
-            # go back to.
-            guy.orphan()
+            # His note has gone in the bin, so he goes with it. Left out there
+            # he is a mascot with nothing behind him: the desk reads as
+            # cleared and he is still stood on the taskbar with no note to
+            # send him back to.
+            guy.vanish()
         # A pending autosave outlives the window unless it is called off here,
         # and an "after" job that fires into a destroyed widget is Tk's
         # "invalid command name" at shutdown. Write first, then cancel.
@@ -792,12 +812,66 @@ class NoteWindow(tk.Toplevel):
         menu.add_checkbutton(label="Show mascot", variable=self.var_mascot,
                              command=self._menu_mascot)
         menu.add_command(label="Send him home", command=self._menu_home)
+        menu.add_command(label="Sit with me  (25 min)", command=self._menu_focus)
         menu.add_command(label="New note", command=self._menu_new)
+        menu.add_separator()
+        self.menu_history = tk.Menu(menu, tearoff=0)
+        menu.add_cascade(label="Earlier versions", menu=self.menu_history)
         menu.add_separator()
         menu.add_command(label="Move to Trash", command=self.move_to_trash)
         self.menu = menu
         self._unpin_index = menu.index("Unpin")
         self._home_index = menu.index("Send him home")
+
+    def earlier_versions(self):
+        """Saved versions older than what is on the note, newest first."""
+        past = self.note.get("history") or []
+        here = (self.note.get("heading", ""), self.note.get("body", ""))
+        older = [v for v in past
+                 if (v.get("heading", ""), v.get("body", "")) != here]
+        older.reverse()
+        return older
+
+    def _sync_history_menu(self):
+        """Rebuilt every time the menu opens: a version list that is a frame
+        out of date is a list that offers to restore something else."""
+        menu = self.menu_history
+        menu.delete(0, "end")
+        older = self.earlier_versions()
+        if not older:
+            menu.add_command(label="Nothing earlier yet", state="disabled")
+            return
+        for i, version in enumerate(older):
+            line = " ".join((version.get("heading", "") + " " +
+                             version.get("body", "")).split())[:34] or "empty"
+            menu.add_command(label="%s  -  %s" % (_when(version.get("t", 0.0)),
+                                                  line),
+                             command=lambda k=i: self.restore_version(k))
+
+    def restore_version(self, index):
+        """Put an earlier version back on the note.
+
+        The version being replaced is already in the history - it was saved to
+        get there - so this is itself undoable from the same menu.
+        """
+        older = self.earlier_versions()
+        if not 0 <= index < len(older):
+            return False
+        version = older[index]
+        was_editing = self.editing
+        self.body.configure(state="normal")
+        self.head.configure(state="normal")
+        self.head.delete("1.0", "end")
+        self.head.insert("1.0", version.get("heading", ""))
+        self.body.delete("1.0", "end")
+        self.body.insert("1.0", version.get("body", ""))
+        if not was_editing:
+            self.body.configure(state="disabled")
+            self.head.configure(state="disabled")
+        self._capture()
+        self.flush()
+        self._schedule_autosize()
+        return True
 
     def _sync_menu(self):
         """Reflect the note's current state in the menu. Its own method so it
@@ -806,6 +880,7 @@ class NoteWindow(tk.Toplevel):
         self.var_top.set(self.note["topmost"])
         self.var_mascot.set(self.mascot_enabled())
         self.menu.entryconfigure(0, label="Done editing" if self.editing else "Edit note")
+        self._sync_history_menu()
         pin = self.note.get("pin")
         self.menu.entryconfigure(
             self._unpin_index,
@@ -871,6 +946,28 @@ class NoteWindow(tk.Toplevel):
         """He is back, and the note draws him again."""
         self._roamer = None
         self.mascot.come_back()
+
+    def detach_for_focus(self):
+        """A roamer off this note, stood where the mascot was.
+
+        The drag does this too, but from an event and with a hand to hand him
+        to; this is the same peel with nobody holding him afterwards.
+        """
+        if self._roamer is not None:
+            return self._roamer
+        if not self.mascot.visible():
+            return None         # switched off: there is nobody on this note
+        head = self.mascot.head_at()
+        guy = roamer.Roamer(self.app, self,
+                            self.winfo_rootx() + head[0],
+                            self.winfo_rooty() + head[1] + roamer.STAND_H)
+        self.mascot.leave()
+        self._roamer = guy
+        guy.let_go()
+        return guy
+
+    def _menu_focus(self):
+        roamer.focus(self)
 
     def _menu_home(self):
         guy = roamer.for_note(self.note["id"])
@@ -1290,9 +1387,39 @@ class NoteWindow(tk.Toplevel):
         self._schedule_autosize()
 
     def _capture(self):
+        was = self.note.get("body", "")
         self.note["heading"] = self.head.get("1.0", "end-1c").replace("\n", " ").strip()
         self.note["body"] = self.body.get("1.0", "end-1c")
         self.note["marks"] = self._read_marks()
+        self._maybe_finished(was, self.note["body"])
+
+    def _maybe_finished(self, was, now_text):
+        """The last box on this note has just been ticked.
+
+        Every change to the body comes through _capture, so this is the one
+        place that can see it happen - a click on a box in view mode and a
+        typed "[x]" in edit mode are the same event from here.
+
+        Two counts rather than one question: there has to have been something
+        left to do, there has to be nothing left now, and one more of them has
+        to be ticked than was before. Without that last part, deleting the only
+        line you had not done would read as having done it.
+        """
+        empty_was, done_was = mascot_mod.box_counts(was)
+        empty_now, done_now = mascot_mod.box_counts(now_text)
+        if empty_was and not empty_now and done_now > done_was:
+            self.well_done()
+
+    def well_done(self):
+        """Every box ticked. Whoever is about makes something of it."""
+        guy = roamer.for_note(self.note["id"])
+        if guy is None and self.mascot.visible():
+            self.mascot.cheer()
+        try:
+            middle = self.winfo_rootx() + self.winfo_width() / 2.0
+        except tk.TclError:
+            return
+        roamer.applaud(middle, self.note["id"])
 
     def schedule_save(self):
         """Autosave: write once the typing pauses, not on every keystroke."""

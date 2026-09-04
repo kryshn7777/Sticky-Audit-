@@ -96,6 +96,88 @@ def test_unknown_fields_do_not_crash(path):
     assert s.trash == [], "non-dict trash entries are dropped"
 
 
+def test_history_keeps_the_last_few(path):
+    """Crash-proof is not regret-proof: what you overwrote is still there."""
+    s = store.Store(path)
+    note = s.add("yellow")
+
+    def age_it():
+        """Push the newest version back past the gap, so the next save keeps
+        it rather than rewriting it. Standing in for the two minutes."""
+        s.notes[0]["history"][-1]["t"] -= store.HISTORY_GAP + 1.0
+
+    for text in ("one", "two", "three"):
+        s.update(note["id"], body=text)
+        s.save()
+    assert [v["body"] for v in s.notes[0]["history"]] == ["three"], (
+        "saves inside the gap rewrite the newest version rather than piling up",
+        [v["body"] for v in s.notes[0]["history"]])
+    assert store.remember(s.notes[0]) is False, \
+        "a note that has not changed adds nothing"
+
+    for text in ("four", "five"):
+        age_it()
+        s.update(note["id"], body=text)
+        s.save()
+    assert [v["body"] for v in s.notes[0]["history"]] == \
+        ["three", "four", "five"], [v["body"] for v in s.notes[0]["history"]]
+
+    for i in range(store.HISTORY_MAX + 4):
+        age_it()
+        s.update(note["id"], body="v%d" % i)
+        s.save()
+    assert len(s.notes[0]["history"]) == store.HISTORY_MAX, \
+        "the history is capped, or a note grows for ever"
+    assert s.notes[0]["history"][-1]["body"] == "v%d" % (store.HISTORY_MAX + 3)
+
+    reloaded = store.Store(path)
+    assert [v["body"] for v in reloaded.notes[0]["history"]] == \
+        [v["body"] for v in s.notes[0]["history"]], "and it survives a restart"
+
+    # A hand-edited file must cost the versions, never the note.
+    s.notes[0]["history"].append("not a version at all")
+    s.save()
+    back = store.Store(path)
+    assert all(isinstance(v, dict) for v in back.notes[0]["history"]), \
+        "rubbish in the history is dropped"
+    assert back.notes[0]["body"] == s.notes[0]["body"], "and the note is fine"
+
+
+def test_old_folder_keeps_its_notes(_path):
+    """It was StickyNote before it was Sticky.
+
+    A machine that has the old folder goes on reading and writing it; a
+    machine with neither gets the new one. Never both, and nothing is moved.
+    """
+    import tempfile as _tempfile
+    was = os.environ.get("APPDATA")
+    with _tempfile.TemporaryDirectory() as fake:
+        os.environ["APPDATA"] = fake
+        try:
+            older = os.path.join(fake, store.LEGACY_NAME)
+            os.makedirs(older)
+            assert store.data_dir() == older, (
+                "notes written under the old name stay where they are")
+            assert not os.path.isdir(os.path.join(fake, store.APP_NAME)), (
+                "and nothing is created beside them")
+        finally:
+            if was is None:
+                del os.environ["APPDATA"]
+            else:
+                os.environ["APPDATA"] = was
+
+    with _tempfile.TemporaryDirectory() as fresh:
+        os.environ["APPDATA"] = fresh
+        try:
+            assert store.data_dir() == os.path.join(fresh, store.APP_NAME), (
+                "a machine with neither folder gets the new one")
+        finally:
+            if was is None:
+                del os.environ["APPDATA"]
+            else:
+                os.environ["APPDATA"] = was
+
+
 def test_palette_is_readable():
     for name, c in store.COLORS.items():
         ratio = _contrast(c["ink"], c["paper"])
@@ -104,7 +186,8 @@ def test_palette_is_readable():
 
 def main():
     cases = [test_roundtrip, test_trash_restore_purge, test_atomic_write_leaves_no_temp,
-             test_corrupt_file_is_quarantined_not_lost, test_unknown_fields_do_not_crash]
+             test_corrupt_file_is_quarantined_not_lost, test_unknown_fields_do_not_crash,
+             test_history_keeps_the_last_few, test_old_folder_keeps_its_notes]
     for case in cases:
         with tempfile.TemporaryDirectory() as tmp:
             case(os.path.join(tmp, "notes.json"))

@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['C:\\Claude Projects\\StickyNote\\stickynote.pyw'],
+    ['C:\\Claude Projects\\StickyNote\\sticky.pyw'],
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets')],
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='StickyNote',
+    name='Sticky',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -33,7 +33,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='C:\\Claude Projects\\StickyNote\\version_info.txt',
-    icon=['C:\\Claude Projects\\StickyNote\\assets\\stickynote.ico'],
+    icon=['C:\\Claude Projects\\StickyNote\\assets\\sticky.ico'],
 )
 coll = COLLECT(
     exe,
@@ -42,5 +42,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='StickyNote',
+    name='Sticky',
 )

@@ -1,7 +1,7 @@
 <#
-    Sticky Notes - build a standalone Windows application.
+    Sticky - build a standalone Windows application.
 
-    Produces dist\StickyNote\StickyNote.exe, which runs on a machine with no
+    Produces dist\Sticky\Sticky.exe, which runs on a machine with no
     Python installed, plus a zip ready to hand to someone.
 
     Usage:
@@ -18,7 +18,7 @@
 [CmdletBinding()]
 param(
     [string]$Version = "1.0.0",
-    [string]$Publisher = "Sticky Notes",
+    [string]$Publisher = "Sticky",
     [switch]$OneFile,
     [switch]$SkipZip,
     [string]$PythonPath
@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not install PyInstaller.' }
 }
 
-if (-not (Test-Path (Join-Path $Root 'assets\stickynote.ico'))) {
+if (-not (Test-Path (Join-Path $Root 'assets\sticky.ico'))) {
     Write-Host 'Building assets...'
     & $python (Join-Path $Root 'make_icon.py')
 }
@@ -106,12 +106,12 @@ VSVersionInfo(
   kids=[
     StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', '$Publisher'),
-      StringStruct('FileDescription', 'Sticky Notes for Windows'),
+      StringStruct('FileDescription', 'Sticky for Windows'),
       StringStruct('FileVersion', '$Version.0'),
-      StringStruct('InternalName', 'StickyNote'),
+      StringStruct('InternalName', 'Sticky'),
       StringStruct('LegalCopyright', '$Publisher'),
-      StringStruct('OriginalFilename', 'StickyNote.exe'),
-      StringStruct('ProductName', 'Sticky Notes'),
+      StringStruct('OriginalFilename', 'Sticky.exe'),
+      StringStruct('ProductName', 'Sticky'),
       StringStruct('ProductVersion', '$Version.0')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ])
@@ -119,14 +119,14 @@ VSVersionInfo(
 
 # ------------------------------------------------------------------- build
 
-Write-Host "Building StickyNote $Version..." -ForegroundColor Cyan
+Write-Host "Building Sticky $Version..." -ForegroundColor Cyan
 
 $pyArgs = @(
     '-m', 'PyInstaller',
     '--noconfirm', '--clean',
     '--windowed',                      # GUI app: never flash a console window
-    '--name', 'StickyNote',
-    '--icon', (Join-Path $Root 'assets\stickynote.ico'),
+    '--name', 'Sticky',
+    '--icon', (Join-Path $Root 'assets\sticky.ico'),
     '--add-data', 'assets;assets',
     '--version-file', $versionFile,
     # Pillow builds the icon and the paper grain; the app never imports it.
@@ -141,7 +141,7 @@ $pyArgs = @(
     '--exclude-module', 'lib2to3'
 )
 if ($OneFile) { $pyArgs += '--onefile' }
-$pyArgs += (Join-Path $Root 'stickynote.pyw')
+$pyArgs += (Join-Path $Root 'sticky.pyw')
 
 & $python @pyArgs
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
@@ -151,16 +151,16 @@ Remove-Item $versionFile -Force -ErrorAction SilentlyContinue
 # -------------------------------------------------------------------- report
 
 if ($OneFile) {
-    $exe = Join-Path $Root 'dist\StickyNote.exe'
+    $exe = Join-Path $Root 'dist\Sticky.exe'
     $payload = $exe
 } else {
-    $exe = Join-Path $Root 'dist\StickyNote\StickyNote.exe'
-    $payload = Join-Path $Root 'dist\StickyNote'
+    $exe = Join-Path $Root 'dist\Sticky\Sticky.exe'
+    $payload = Join-Path $Root 'dist\Sticky'
 }
 if (-not (Test-Path $exe)) { throw "Expected $exe but it was not produced." }
 
 # Ship the shortcut installer and the readme inside the folder so the zip is
-# self-contained. install.ps1 detects StickyNote.exe and skips Python entirely.
+# self-contained. install.ps1 detects Sticky.exe and skips Python entirely.
 if (-not $OneFile) {
     Copy-Item (Join-Path $Root 'install.ps1') $payload -Force
     Copy-Item (Join-Path $Root 'README.md') $payload -Force -ErrorAction SilentlyContinue
@@ -172,7 +172,7 @@ Write-Host ('Built {0}' -f $exe) -ForegroundColor Green
 Write-Host ('Payload {0:N1} MB' -f ($size / 1MB))
 
 if (-not $SkipZip) {
-    $zip = Join-Path $Root ("dist\StickyNote-{0}-win64.zip" -f $Version)
+    $zip = Join-Path $Root ("dist\Sticky-{0}-win64.zip" -f $Version)
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path $payload -DestinationPath $zip
     Write-Host ('Zipped  {0} ({1:N1} MB)' -f $zip, ((Get-Item $zip).Length / 1MB))

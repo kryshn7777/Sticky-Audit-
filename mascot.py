@@ -168,6 +168,18 @@ BOX_OPEN = "[ ] "
 BOX_DONE = "[x] "
 BOX_PREFIXES = (BOX_OPEN, BOX_DONE, "[X] ")
 
+# The one thing about him nobody guesses: he comes off the note. Said once,
+# on the first run, and never again on that machine.
+HELLO_LINE = "Psst - drag me off the note."
+
+# ...and what he says when the last of them is finally ticked.
+DONE_LINES = (
+    "That's the lot!",
+    "All of them. Look at that.",
+    "Nothing left on this one.",
+    "Done. Every box.",
+)
+
 LINES = (
     "Hey, are you forgetting me?",
     "Those boxes are still empty...",
@@ -197,6 +209,24 @@ def margins(enabled, pose="stand"):
 
 def has_open_box(text):
     return any(line.lstrip().startswith(BOX_OPEN) for line in text.split("\n"))
+
+
+def box_counts(text):
+    """(unticked, ticked) on this note.
+
+    Counted rather than answered yes/no because finishing a list is the
+    difference between two counts: the last empty box going, and a ticked one
+    arriving in its place. Without the second half, deleting the only line you
+    had not done would read as having done it.
+    """
+    empty = full = 0
+    for line in text.split("\n"):
+        line = line.lstrip()
+        if line.startswith(BOX_OPEN):
+            empty += 1
+        elif line.startswith(BOX_DONE) or line.startswith("[X] "):
+            full += 1
+    return empty, full
 
 
 def strip_box(line):
@@ -724,6 +754,22 @@ class Mascot:
             self._react_turn += 1
             if random.random() < TAP_CHANCE:
                 self.say(random.choice(TAP_LINES))
+        self._set_happy(True)
+        self._react_step(0)
+        return True
+
+    def cheer(self):
+        """Every box on his note is ticked. He does not need to be poked.
+
+        The same reaction machinery a tap uses, minus the tap bookkeeping: a
+        second animation system for one moment would be two things to keep
+        working and one of them would rot.
+        """
+        if not self._eyes:
+            return False
+        self._cancel_react()
+        self._reaction = "hop"
+        self.say(random.choice(DONE_LINES))
         self._set_happy(True)
         self._react_step(0)
         return True
@@ -1944,6 +1990,13 @@ class PointerTracker:
     PIN_MS = 16        # a host window that moved on the last look
     PIN_IDLE_MS = 250  # one that did not
 
+    # Somebody else's business, looked at on the same tick. The app hangs the
+    # quick-capture hotkey here rather than owning a timer for it: the key
+    # itself arrives without one, but the flag it sets has to be read
+    # somewhere, and a second loop is a second thing to cancel at quit.
+    ALSO_MS = 250      # ...and the slowest this may tick while one is set
+    also = None        # a callable run on every tick, or None
+
     # 16ms is a frame. A window being dragged moves the whole time, and at
     # 40ms the note trailed it by a visible hand's breadth before catching up
     # - which reads as a note that is following the window rather than one
@@ -2038,6 +2091,8 @@ class PointerTracker:
     def _arm(self, delay):
         if self._job is not None:
             return
+        if self.also is not None:
+            delay = min(delay, self.ALSO_MS)
         try:
             self._job = self.root.after(delay, self.tick)
         except tk.TclError:
@@ -2045,6 +2100,11 @@ class PointerTracker:
 
     def tick(self):
         self._cancel()          # safe to call directly, from anywhere
+        if self.also is not None:
+            try:
+                self.also()
+            except Exception:
+                pass            # never let a passenger stop the pointer
         pin_delay = self._follow_pins()
         if not self.mascots:
             self._arm(pin_delay or self.EMPTY_MS)

@@ -9,7 +9,7 @@ import os
 
 from PIL import Image, ImageDraw
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "stickynote.ico")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sticky.ico")
 PAPER = (255, 216, 102, 255)
 SHADE = (232, 189, 74, 255)
 FOLD = (247, 232, 178, 255)

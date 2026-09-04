@@ -8,8 +8,8 @@ import ctypes
 import os
 import sys
 
-APP_ID = "Claude.StickyNote"          # AppUserModelID: ties windows to the pinned icon
-BOARD_TITLE = "Sticky Notes"          # also the handle the second instance looks for
+APP_ID = "Claude.Sticky"              # AppUserModelID: ties windows to the pinned icon
+BOARD_TITLE = "Sticky"                # also the handle the second instance looks for
 
 _IS_WINDOWS = sys.platform == "win32"
 _mutex = None                         # kept alive for the life of the process
@@ -54,7 +54,7 @@ def app_command():
     """
     if FROZEN:
         return '"%s"' % sys.executable
-    launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickynote.pyw")
+    launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sticky.pyw")
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     if not os.path.exists(pythonw):
         pythonw = sys.executable
@@ -184,10 +184,140 @@ def raise_existing(title=BOARD_TITLE):
     return True
 
 
+# ------------------------------------------------------- a key from anywhere
+# RegisterHotKey against the thread (a NULL window) posts WM_HOTKEY to the
+# thread queue - and Tcl's Windows notifier drains that queue itself, so the
+# message is gone before anything of ours could read it. Measured: posted by
+# hand, one root.update() and it is not there.
+#
+# Posted to a window instead, the same pump dispatches it to that window's
+# procedure. So this owns a message-only window with a procedure of its own,
+# and the key arrives through the loop the app is already running. No timer,
+# no polling, nothing to keep in step.
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 0x0001, 0x0002, 0x0004, 0x0008
+_WM_HOTKEY = 0x0312
+_HWND_MESSAGE = -3
+_HOTKEY_ID = 0xB17
+_HOTKEY_CLASS = "StickyHotkeyWindow"
+
+if _IS_WINDOWS:
+    from ctypes import wintypes
+
+    _WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND,
+                                  wintypes.UINT, ctypes.c_size_t,
+                                  ctypes.c_ssize_t)
+
+    class _WndClass(ctypes.Structure):
+        _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", _WNDPROC),
+                    ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                    ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HICON),
+                    ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HBRUSH),
+                    ("lpszMenuName", wintypes.LPCWSTR),
+                    ("lpszClassName", wintypes.LPCWSTR)]
+
+
+class Hotkey:
+    """One system-wide key combination, and what to do when it is pressed.
+
+    Everything here degrades to "no hotkey" rather than to an exception: the
+    combination may already belong to another application, and an app that
+    refuses to start because somebody else owns Ctrl+Alt+N is a worse app than
+    one without a hotkey.
+    """
+
+    def __init__(self):
+        self.pressed = False
+        self.hwnd = None
+        self._proc = None       # kept alive: Windows holds a raw pointer to it
+        self._class = None
+
+    def _window(self):
+        if self.hwnd is not None:
+            return self.hwnd
+        try:
+            self._proc = _WNDPROC(self._dispatch)
+            cls = _WndClass()
+            cls.lpfnWndProc = self._proc
+            cls.hInstance = ctypes.windll.kernel32.GetModuleHandleW(None)
+            cls.lpszClassName = _HOTKEY_CLASS
+            self._class = cls           # kept alive for the same reason
+            # A second App in the same process finds the class already
+            # registered, which is not a failure: the window below is what
+            # actually has to appear, and it says so itself.
+            ctypes.windll.user32.RegisterClassW(ctypes.byref(cls))
+            user32 = _user32()
+            user32.CreateWindowExW.restype = wintypes.HWND
+            self.hwnd = user32.CreateWindowExW(
+                0, _HOTKEY_CLASS, "sticky", 0, 0, 0, 0, 0,
+                wintypes.HWND(_HWND_MESSAGE), None, cls.hInstance, None)
+        except (OSError, AttributeError):
+            self.hwnd = None
+        return self.hwnd
+
+    def _dispatch(self, hwnd, msg, wparam, lparam):
+        """Windows calls this from inside the app's own message loop.
+
+        A flag, and nothing else. Doing the work here means Tk work inside a
+        Windows callback inside Tcl's own pump, and in the app that comes
+        apart at the C level - a fatal "the GIL is released" out of
+        tkinter's update(). Whoever owns the key asks for it instead.
+        """
+        if msg == _WM_HOTKEY and int(wparam) == _HOTKEY_ID:
+            self.pressed = True
+            return 0
+        try:
+            return _user32().DefWindowProcW(wintypes.HWND(hwnd), msg,
+                                            ctypes.c_size_t(wparam),
+                                            ctypes.c_ssize_t(lparam))
+        except OSError:
+            return 0
+
+    def take(self):
+        """Was it pressed since the last look? Asked, never pushed."""
+        was, self.pressed = self.pressed, False
+        return was
+
+    def register(self, mods=None, key=ord("N")):
+        """Claim the key. True if Windows gave it to us."""
+        if not _IS_WINDOWS:
+            return False
+        if mods is None:
+            mods = MOD_CONTROL | MOD_ALT
+        hwnd = self._window()
+        if not hwnd:
+            return False
+        try:
+            return bool(_user32().RegisterHotKey(wintypes.HWND(hwnd),
+                                                 _HOTKEY_ID, mods, key))
+        except OSError:
+            return False
+
+    def unregister(self):
+        if not _IS_WINDOWS or not self.hwnd:
+            return
+        try:
+            _user32().UnregisterHotKey(wintypes.HWND(self.hwnd), _HOTKEY_ID)
+        except OSError:
+            pass
+
+    def close(self):
+        """Give the key back and take the window down."""
+        self.unregister()
+        if _IS_WINDOWS and self.hwnd:
+            try:
+                _user32().DestroyWindow(wintypes.HWND(self.hwnd))
+            except OSError:
+                pass
+        self.hwnd = None
+        self._proc = None
+        self._class = None
+
+
 # --------------------------------------------------------------- run at login
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_RUN_NAME = "StickyNote"
+_RUN_NAME = "Sticky"
+_RUN_LEGACY = "StickyNote"    # the name the entry had before the rename
 
 
 def startup_command():
@@ -201,7 +331,8 @@ def get_run_at_startup():
         # is not what Windows reads. The manifest declares a startup task and
         # the user turns it on in Settings; we cannot read that state here.
         return False
-    return _read_reg(_RUN_KEY, _RUN_NAME, None) is not None
+    return (_read_reg(_RUN_KEY, _RUN_NAME, None) is not None
+            or _read_reg(_RUN_KEY, _RUN_LEGACY, None) is not None)
 
 
 def open_startup_settings():
@@ -211,6 +342,14 @@ def open_startup_settings():
         return True
     except OSError:
         return False
+
+
+def _drop_run(winreg, key, name):
+    """Take a value out of the Run key, or leave it alone if it is not there."""
+    try:
+        winreg.DeleteValue(key, name)
+    except FileNotFoundError:
+        pass
 
 
 def set_run_at_startup(enabled):
@@ -227,10 +366,11 @@ def set_run_at_startup(enabled):
             if enabled:
                 winreg.SetValueEx(key, _RUN_NAME, 0, winreg.REG_SZ, startup_command())
             else:
-                try:
-                    winreg.DeleteValue(key, _RUN_NAME)
-                except FileNotFoundError:
-                    pass
+                _drop_run(winreg, key, _RUN_NAME)
+            # Either way the old name goes. Left behind, it points Windows at
+            # a launcher that no longer exists under that name, and the
+            # failure is silent at login where nobody is watching.
+            _drop_run(winreg, key, _RUN_LEGACY)
         return True
     except OSError:
         return False
@@ -425,6 +565,61 @@ def _own_window(hwnd):
     except OSError:
         return True
     return pid.value == _own_pid()
+
+
+# Windows the shell keeps at the size of the screen. Neither is somebody
+# presenting: Progman is the desktop itself, and it comes to the front the
+# moment anybody clicks the wallpaper.
+_SHELL_CLASSES = ("Progman", "WorkerW", "Shell_TrayWnd", "Windows.UI.Core.CoreWindow")
+
+
+def window_class(hwnd):
+    """The window class name, or "" if it cannot be read."""
+    if not _IS_WINDOWS or not hwnd:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        if not _user32().GetClassNameW(ctypes.c_void_p(hwnd), buf, 256):
+            return ""
+    except OSError:
+        return ""
+    return buf.value
+
+
+def covers(rect, area, slack=2):
+    """Does a window at `rect` cover the whole of `area`?
+
+    Pure, so the decision can be checked without a real full-screen window in
+    front of the suite. The slack is for a window that reports a pixel over
+    the edge, which several games do.
+    """
+    if rect is None or area is None:
+        return False
+    return (rect[0] <= area[0] + slack and rect[1] <= area[1] + slack
+            and rect[2] >= area[2] - slack and rect[3] >= area[3] - slack)
+
+
+def foreground_fullscreen():
+    """True when the window in front covers its whole monitor.
+
+    The whole monitor rather than the work area, deliberately: a maximised
+    window stops at the top of the taskbar, and a maximised window is somebody
+    working rather than somebody presenting. Our own windows never count, or
+    the crew would hide from a note.
+    """
+    if not _IS_WINDOWS:
+        return False
+    try:
+        hwnd = _user32().GetForegroundWindow()
+    except OSError:
+        return False
+    if not hwnd or _own_window(hwnd) or window_class(hwnd) in _SHELL_CLASSES:
+        return False
+    rect = window_rect(hwnd)
+    if rect is None:
+        return False
+    return covers(rect, screen_area((rect[0] + rect[2]) // 2,
+                                    (rect[1] + rect[3]) // 2))
 
 
 def window_under(x, y):
