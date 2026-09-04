@@ -19,7 +19,7 @@ export const CtaSection = () => {
           transition={{ duration: 0.4 }}
           className="text-5xl md:text-7xl font-sans font-black tracking-tighter mb-8 leading-[0.9] uppercase"
         >
-          Ready to Declutter?
+          Take One Off The Note.
         </motion.h2>
         
         <motion.p
@@ -29,7 +29,7 @@ export const CtaSection = () => {
           transition={{ duration: 0.4, delay: 0.1 }}
           className="text-xl md:text-2xl text-black font-sans font-bold mb-12 max-w-2xl mx-auto"
         >
-          Join thousands of organized minds. Download the lightning-fast, privacy-first sticky note app today.
+          Free, open source, and about a megabyte. Windows 10 or 11. Your notes stay on your machine - and so does he.
         </motion.p>
         
         <motion.div

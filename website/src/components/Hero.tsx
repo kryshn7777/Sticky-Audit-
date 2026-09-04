@@ -12,7 +12,7 @@ export const Hero = () => {
           className="mb-10 relative"
         >
           <div className="inline-block px-6 py-3 bg-neo-yellow rotate-[-4deg] border-3 border-black neo-shadow mb-6">
-            <span className="font-handwriting text-3xl text-brand-dark font-bold">Never forget an idea!</span>
+            <span className="font-handwriting text-3xl text-brand-dark font-bold">Sticky — he lives down there ↓</span>
           </div>
           
           <svg className="absolute -right-12 top-10 w-16 h-16 text-black rotate-[20deg]" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -27,9 +27,9 @@ export const Hero = () => {
           transition={{ duration: 1, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
           className="text-6xl md:text-8xl font-sans font-black tracking-tight text-brand-dark mb-8 leading-[1.1] uppercase"
         >
-          Declutter<br/>
-          Your Mind.<br/>
-          <span className="inline-block bg-neo-pink text-white px-4 py-2 mt-4 border-4 border-black neo-shadow-sm rotate-[1deg]">Instantly.</span>
+          Notes That<br/>
+          Stay Put.<br/>
+          <span className="inline-block bg-neo-pink text-white px-4 py-2 mt-4 border-4 border-black neo-shadow-sm rotate-[1deg]">A Crew That Doesn't.</span>
         </motion.h1>
 
         <motion.p
@@ -38,7 +38,7 @@ export const Hero = () => {
           transition={{ duration: 0.8, delay: 0.6 }}
           className="text-xl md:text-3xl font-sans text-brand-dark font-medium max-w-3xl mb-12 border-l-4 border-black pl-6 text-left bg-white p-6 neo-shadow-sm"
         >
-          The lightning-fast, crash-proof sticky note for Windows that respects your privacy and your CPU.
+          Real paper windows on your desktop — and a small crew who live on them. Drag one off and he walks the taskbar, hangs off your note edges, and goes looking for the others. Offline, no account, and about a fifth of one percent of a core when nobody is out there.
         </motion.p>
 
         <motion.div

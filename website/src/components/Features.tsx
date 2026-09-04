@@ -2,66 +2,66 @@ import { useRef } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { Zap, ShieldCheck, Maximize, Battery, HardDrive, Ghost, Lock, Eye } from 'lucide-react';
+import { ShieldCheck, Battery, Flame, MessagesSquare, Footprints, Sparkles, Lock, Eye } from 'lucide-react';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 const features = [
   {
-    title: "Zero Baggage.",
-    description: "Built on pure Python 3. No npm installs, no build steps, and no bloated frameworks. Just raw, unadulterated performance.",
-    icon: <Zap size={32} strokeWidth={2.5} />,
+    title: "He Gets Off The Note.",
+    description: "Drag him off the paper and he falls with weight, picks himself up, and goes for a walk along the taskbar. Drop him beside a note and he takes hold of the edge where you dropped him - and hangs there while you move the window.",
+    icon: <Footprints size={32} strokeWidth={2.5} />,
     color: "bg-neo-yellow",
     span: "md:col-span-2 md:row-span-1",
   },
   {
-    title: "Zero CPU.",
-    description: "Obsessively optimized. With zero polling loops, the app draws 0.00% CPU when idle.",
+    title: "Costs Nothing To Keep.",
+    description: "0.2-0.5% of one core with nobody out there - the same reading as with him switched off entirely. One of them stood on the bar: 1.4%.",
     icon: <Battery size={32} strokeWidth={2.5} />,
     color: "bg-neo-green",
     span: "md:col-span-1 md:row-span-1",
   },
   {
-    title: "Native Freedom.",
-    description: "Break out of the browser tab. Your notes live directly on your desktop as real native windows that persist across reboots.",
-    icon: <Maximize size={32} strokeWidth={2.5} />,
+    title: "Real Paper.",
+    description: "Square-cut corners, a handwritten face, and a corner that peels up when he walks round to change the colour.",
+    icon: <Eye size={32} strokeWidth={2.5} />,
     color: "bg-neo-blue",
     span: "md:col-span-1 md:row-span-1",
   },
   {
-    title: "Bulletproof Saves.",
-    description: "Power cut? Yanked cord? Your ideas are safe. Every keystroke is written atomically. Data corruption is mathematically impossible.",
+    title: "It Can't Eat Your Note.",
+    description: "Every save is a temp file, an fsync and a replace, so a power cut leaves you the old file or the new one and never a torn one. There is no Save button: what you type lands on disk 0.7 seconds after you stop.",
     icon: <ShieldCheck size={48} strokeWidth={2.5} />,
     color: "bg-neo-pink",
     span: "md:col-span-2 md:row-span-2",
     large: true
   },
   {
-    title: "Think. Don't Save.",
-    description: "Forget the Save button. We automatically flush your genius to disk exactly 0.7 seconds after you stop typing. Just write.",
-    icon: <HardDrive size={32} strokeWidth={2.5} />,
+    title: "They Find Each Other.",
+    description: "Two, three or four of them meet up on the taskbar and hold a conversation entirely in gesture: one talking at a time, a different shape of hand for every sentence, and the rest turned to whoever has the floor.",
+    icon: <MessagesSquare size={32} strokeWidth={2.5} />,
     color: "bg-neo-orange",
     span: "md:col-span-2 md:row-span-1",
   },
   {
-    title: "Absolute Privacy.",
-    description: "100% offline by design. No sockets opened, no telemetry, no cloud. Your private thoughts stay precisely where they belong: on your machine.",
+    title: "Nothing To Log Into.",
+    description: "No account, no sync, no telemetry, and no sockets opened - not even on loopback. Nothing here can be discontinued out from under you.",
     icon: <Lock size={32} strokeWidth={2.5} />,
     color: "bg-neo-pink",
     span: "md:col-span-2 md:row-span-1",
   },
   {
-    title: "Your Desk Companion.",
-    description: "Say hello to Sticky! A procedural stickman that holds up your notes, tracks your cursor, and reacts to your pokes with physics-based charm.",
-    icon: <Ghost size={48} strokeWidth={2.5} />,
+    title: "A Hut, And A Fire.",
+    description: "Three or more of them walk off the edge of the screen for wood and come back with planks to build a hut to go into. Or they light a campfire, sit down round it and talk until it burns out - then stand up, wave, and go their separate ways.",
+    icon: <Flame size={48} strokeWidth={2.5} />,
     color: "bg-neo-yellow",
     span: "md:col-span-2 md:row-span-2",
     large: true
   },
   {
-    title: "Unapologetically Bold.",
-    description: "Form meets function. Our aggressive high-contrast palette clears strict WCAG AAA contrast standards, paired perfectly with the highly legible Space Grotesk font.",
-    icon: <Eye size={48} strokeWidth={2.5} />,
+    title: "Not All On Day One.",
+    description: "Every one of those is on odds, and none of it repeats to a schedule. Months in, they do something on your taskbar you have never seen before - which is the part no feature list can sell you.",
+    icon: <Sparkles size={48} strokeWidth={2.5} />,
     color: "bg-neo-blue",
     span: "md:col-span-2 md:row-span-2",
     large: true
