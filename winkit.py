@@ -238,7 +238,10 @@ class Hotkey:
             self._proc = _WNDPROC(self._dispatch)
             cls = _WndClass()
             cls.lpfnWndProc = self._proc
-            cls.hInstance = ctypes.windll.kernel32.GetModuleHandleW(None)
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+            kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+            cls.hInstance = kernel32.GetModuleHandleW(None)
             cls.lpszClassName = _HOTKEY_CLASS
             self._class = cls           # kept alive for the same reason
             # A second App in the same process finds the class already
@@ -247,10 +250,20 @@ class Hotkey:
             ctypes.windll.user32.RegisterClassW(ctypes.byref(cls))
             user32 = _user32()
             user32.CreateWindowExW.restype = wintypes.HWND
+            # Declared, not left to ctypes: an undeclared argument is passed as
+            # a C int, and hInstance is a real 64-bit address. Windows puts the
+            # module somewhere new on every boot, so on the boots where that
+            # address had bit 31 set the call raised "int too long to convert"
+            # and took the whole app down before a window ever appeared.
+            user32.CreateWindowExW.argtypes = [
+                wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
+                wintypes.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, wintypes.HWND, wintypes.HMENU,
+                wintypes.HINSTANCE, wintypes.LPVOID]
             self.hwnd = user32.CreateWindowExW(
                 0, _HOTKEY_CLASS, "sticky", 0, 0, 0, 0, 0,
                 wintypes.HWND(_HWND_MESSAGE), None, cls.hInstance, None)
-        except (OSError, AttributeError):
+        except (OSError, AttributeError, ValueError, ctypes.ArgumentError):
             self.hwnd = None
         return self.hwnd
 
