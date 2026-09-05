@@ -26,6 +26,11 @@ import random
 import tkinter as tk
 
 import winkit
+from mascot import HEAD as _HEAD, LEG_H as _LEG_H, _walker
+
+# The walker is drawn about his face, not his feet - see Roamer.paint,
+# which measures the same way.
+WALK_H = _HEAD // 2 + _LEG_H
 
 # ------------------------------------------------------------------ the ball
 #
@@ -119,6 +124,155 @@ WRECK_N = 7
 WRECK_S = (3.5, 7.0)    # how long a plank lies there before it is gone
 WRECK_FADE = 0.35       # the last of its life, spent shrinking away
 
+# -------------------------------------------------------------------- a van
+# Somebody has called for help and something turns up for it: an ambulance
+# for a man who has been knocked down, a police car for two who are still at
+# it. One prop for both - a shape that drives on, does its one thing and
+# drives off again - and it knows no more about a roamer than the hut does.
+# The crew reads `phase` off it and plays its own half against that: who gets
+# carried, who runs, and who goes home afterwards is all decided over there.
+# The two of them are different vehicles, not one box in two colours. A type
+# III ambulance is about two and a third times as long as it is tall, and the
+# patient box behind the cab is the tall part - that step down to the cab roof
+# is what makes it read as an ambulance from across the room. A patrol car is
+# a saloon: longer, much lower, with the cabin set into the middle of it.
+AMB_W, AMB_H = 116.0, 46.0      # the box, floor to roof
+AMB_CAB = 13.0                  # how far the cab roof sits below the box
+AMB_BOX = 0.60                  # how much of the length the box takes
+CAR_W, CAR_H = 126.0, 17.0      # the body, without the cabin on top
+CAR_CAB = 15.0                  # ...and the cabin above it. Long and low:
+                                # a patrol car that is as tall as it is long
+                                # is a van with a light on it
+ICE_W, ICE_H = 108.0, 44.0      # the ice cream van: a box with an awning
+SERVE_MAX_S = 30.0              # nobody parks it there all afternoon
+AWNING_C = "#E86A6A"
+SCOOP_C = "#F2B8CB"
+CONE_C = "#D9A05B"
+WHEEL_R = 9.0
+HUB_R = 3.4
+VAN_SPEED = 430.0
+VAN_OFF = 170.0                 # how far past the edge it starts, and ends
+VAN_STAND = 130.0               # how far short of the job it pulls up
+MEDIC_SPEED = 130.0
+MEDIC_GAP = 40.0                # how far apart the two of them carry it
+STRETCHER_H = 26.0              # how high off the floor they hold it
+LOAD_S = 0.9                    # how long the lift takes
+POLICE_WAIT_S = 1.8             # how long it sits there before giving chase
+LAMP_HZ = 3.0
+PAPER = "#F4EFE2"
+CROSS_C = "#D6453C"
+POLICE_C = "#3B4E8C"
+LAMP_C = "#5FA8FF"
+GLASS_C = "#A8C6D6"
+COAT = "#F7F4EC"                # what the two of them are wearing
+COAT_LIMB = "#C9C2B2"
+
+
+class _Van(object):
+    """An ambulance or a police car: a position, a phase and a clock.
+
+    The phases are the whole interface. "in" is driving on, "out" is the two
+    of them walking to the job, "load" is the lift, "back" is carrying him to
+    the doors, "wait" is a police car sitting there while the pair of them
+    bolt, and "away" is leaving. A medic van goes in-out-load-back-away and a
+    police car goes in-wait-away, so both are the same few lines of step.
+    """
+
+    def __init__(self, kind, at_x, floor, way, walls):
+        self.kind = kind                # "medic", "police" or "icecream"
+        self.w = {"medic": AMB_W, "police": CAR_W}.get(kind, ICE_W)
+        self.at_x = float(at_x)         # what it came for
+        self.floor = float(floor)
+        self.way = float(way)           # +1 driving right
+        self.walls = walls
+        self.x = (walls[0] if way > 0 else walls[1]) - way * VAN_OFF
+        # An ambulance loads through the back, so it pulls up past him and
+        # puts its doors where he is; a police car simply stops short.
+        want = (self.at_x + way * VAN_STAND if kind == "medic"
+                else self.at_x - way * VAN_STAND)
+        self.stop_x = min(max(want, walls[0] + self.w / 2.0),
+                          walls[1] - self.w / 2.0)
+        self.phase = "in"
+        self.t = 0.0
+        self.reach = 0.0                # how far the pair are from the doors
+        self.carry = False              # is there anybody on the stretcher
+
+    @property
+    def door(self):
+        """The back doors: where they get out, and what he is loaded into."""
+        return self.x - self.way * self.w / 2.0
+
+    @property
+    def side(self):
+        """Which way from the doors the job is.
+
+        Worked out rather than fixed at -way, because a van that ran out of
+        room and stopped short of where it meant to has its doors on the
+        other side of him, and the two of them still have to walk to him.
+        """
+        return 1.0 if self.at_x >= self.door else -1.0
+
+    @property
+    def walk(self):
+        """How far they have to go from the doors to reach him."""
+        return max(0.0, abs(self.at_x - self.door))
+
+    def stretcher(self):
+        """Where a man being carried is, or None if nobody is on it yet.
+
+        The crew asks this every frame and puts him there. Leaving him a
+        roamer rather than drawing a body in here is what makes it him who is
+        carried off: his own colours, his own face, his own note to go back
+        to afterwards.
+        """
+        if self.phase not in ("load", "back"):
+            return None
+        return (self.door + self.side * self.reach, self.floor - STRETCHER_H)
+
+    @property
+    def gone(self):
+        return (self.phase == "away"
+                and (self.x < self.walls[0] - VAN_OFF
+                     or self.x > self.walls[1] + VAN_OFF))
+
+    def leave(self):
+        """Finished here. Off it goes, from wherever it is in its day."""
+        if self.phase != "away":
+            self.phase, self.t = "away", 0.0
+
+    def step(self, dt):
+        self.t += dt
+        if self.phase == "in":
+            self.x += self.way * VAN_SPEED * dt
+            if (self.x - self.stop_x) * self.way >= 0.0:
+                self.x = self.stop_x
+                self.phase = {"medic": "out",
+                              "icecream": "serve"}.get(self.kind, "wait")
+                self.t = 0.0
+        elif self.phase == "out":
+            self.reach = min(self.reach + MEDIC_SPEED * dt, self.walk)
+            if self.reach >= self.walk:
+                self.phase, self.t = "load", 0.0
+        elif self.phase == "load":
+            if self.t >= LOAD_S:
+                self.carry = True
+                self.phase, self.t = "back", 0.0
+        elif self.phase == "back":
+            self.reach = max(0.0, self.reach - MEDIC_SPEED * dt)
+            if self.reach <= 0.0:
+                self.phase, self.t = "away", 0.0
+        elif self.phase == "wait":
+            if self.t >= POLICE_WAIT_S:
+                self.phase, self.t = "away", 0.0
+        elif self.phase == "serve":
+            # The crew sends it off when the queue is done; the cap is only
+            # so a van nobody queued at does not sit there for ever.
+            if self.t >= SERVE_MAX_S:
+                self.phase, self.t = "away", 0.0
+        else:
+            self.x += self.way * VAN_SPEED * dt
+
+
 on_knock = None         # set by the crew: called (x, floor) once the hut has
                         # gone, and only when somebody knocked it down
 
@@ -128,6 +282,7 @@ _win = None
 _ball = None
 _hut = None
 _fire = None
+_van = None
 _wreck = []             # [x, y, angle, left, total] a plank
 
 
@@ -349,6 +504,39 @@ def douse():
     _fire = None
 
 
+def call_van(kind, x, floor):
+    """Something on its way to (x, floor). None if there is nowhere for it.
+
+    One at a time: a second ambulance while the first is still loading is two
+    ambulances for one man. Whether it was worth calling is decided by
+    whoever calls it - all this does is drive.
+    """
+    global _van
+    if _van is not None:
+        return None
+    win = _open(x, floor)
+    if win is None or win.rect is None:
+        return None
+    walls = (float(win.rect[0]), float(win.rect[2]))
+    # From the nearer edge, so it is on the screen quickly rather than
+    # crossing the whole bar to reach somebody lying at one end of it.
+    way = 1.0 if (x - walls[0]) < (walls[1] - x) else -1.0
+    _van = _Van(kind, x, floor, way, walls)
+    return _van
+
+
+def van():
+    return _van
+
+
+def send_off():
+    """Whatever was called for is finished with, now rather than when it has
+    driven off. Used when the man it came for is taken out of it."""
+    global _van
+    _van = None
+    paint()
+
+
 def raise_hut(x, floor):
     """Up it goes. None if there is nowhere to put it."""
     global _hut
@@ -409,6 +597,11 @@ def step(dt, elapsed=None):
         _fire.step(dt, gone)
         if _fire.left <= 0.0:
             _fire = None
+    global _van
+    if _van is not None:
+        _van.step(dt)
+        if _van.gone:
+            _van = None
     if _wreck:
         for plank in _wreck:
             plank[3] -= gone
@@ -435,6 +628,11 @@ def paint():
             # is deliberately in the pose: while there is a fire, every frame
             # is a new one.
             None if _fire is None else round(_fire.t, 3),
+            # Same again for the van: while one is on the screen every frame
+            # is a new one, because the lamp flashes and the pair of them are
+            # walking.
+            None if _van is None else (round(_van.x, 1), _van.phase,
+                                       round(_van.reach, 1), round(_van.t, 2)),
             _win.at)
     if pose == _win.drawn:
         return
@@ -450,8 +648,204 @@ def paint():
         _draw_plank(cv, plank, dx, dy)
     if _fire is not None:
         _draw_fire(cv, _fire, dx, dy)
+    if _van is not None:
+        _draw_van(cv, _van, dx, dy)
     if _ball is not None:
         _draw_ball(cv, _ball.x - dx, _ball.y - dy, _ball.spin)
+
+
+def _along(v, u, dx):
+    """A point along the vehicle, 0 at the back of it and 1 at the nose.
+
+    Everything below is laid out in these rather than in pixels, so one set
+    of numbers draws it driving either way and nothing is written twice with
+    the signs flipped.
+    """
+    return v.x - dx + v.way * (u - 0.5) * v.w
+
+
+def _wheel(cv, x, axle):
+    cv.create_oval(x - WHEEL_R, axle - WHEEL_R, x + WHEEL_R, axle + WHEEL_R,
+                   fill=INK, outline=INK, tags="prop")
+    cv.create_oval(x - HUB_R, axle - HUB_R, x + HUB_R, axle + HUB_R,
+                   fill=GLASS_C, outline=INK, tags="prop")
+
+
+def _lightbar(cv, x1, x2, top, t, warm):
+    """Two lamps, one lit at a time, so it actually flashes.
+
+    `warm` is what the other lamp is: red on an ambulance, red on a police
+    car too - the blue one is the pair to it, and a bar where both are the
+    same colour reads as a roof rack.
+    """
+    on = int(t * LAMP_HZ) % 2
+    mid = (x1 + x2) / 2.0
+    for i, (a, b) in enumerate(((x1, mid), (mid, x2))):
+        cv.create_rectangle(a, top - 7.0, b, top,
+                            fill=(LAMP_C if i == 0 else warm) if i == on
+                            else INK, outline=INK, width=1, tags="prop")
+
+
+def _draw_ambulance(cv, v, dx, dy):
+    """A box van: cab at the front, patient box behind it, stripe down it.
+
+    Drawn in the same flat hand as the hut - two-pixel ink, no gradients -
+    because a vehicle rendered better than the man it came for reads as
+    somebody else's artwork parked on the bar.
+    """
+    base = v.floor - dy
+    axle = base - WHEEL_R
+    box_top = base - AMB_H
+    cab_top = box_top + AMB_CAB
+    tail, nose = _along(v, 0.0, dx), _along(v, 1.0, dx)
+    step = _along(v, AMB_BOX, dx)
+    # The box, and the cab in front of it with a sloped nose.
+    cv.create_rectangle(tail, box_top, step, axle,
+                        fill=PAPER, outline=INK, width=2, tags="prop")
+    cv.create_polygon(step, cab_top, _along(v, 0.90, dx), cab_top,
+                      nose, cab_top + 9.0, nose, axle, step, axle,
+                      fill=PAPER, outline=INK, width=2, tags="prop")
+    # The windscreen follows that slope; the door window sits square behind it.
+    cv.create_polygon(_along(v, 0.895, dx), cab_top + 3.0,
+                      _along(v, 0.985, dx), cab_top + 10.0,
+                      _along(v, 0.985, dx), cab_top + 17.0,
+                      _along(v, 0.895, dx), cab_top + 17.0,
+                      fill=GLASS_C, outline=INK, width=1, tags="prop")
+    cv.create_rectangle(_along(v, 0.70, dx), cab_top + 4.0,
+                        _along(v, 0.86, dx), cab_top + 16.0,
+                        fill=GLASS_C, outline=INK, width=1, tags="prop")
+    # The stripe along the box, and the cross on it. Both on the box only:
+    # a stripe that runs over the cab door is a stripe nobody paints.
+    band = box_top + AMB_H * 0.52
+    cv.create_rectangle(tail, band, step, band + 7.0,
+                        fill=CROSS_C, outline="", tags="prop")
+    arm, mid = 8.0, box_top + AMB_H * 0.28
+    cross_x = _along(v, 0.30, dx)
+    cv.create_rectangle(cross_x - arm / 3.0, mid - arm,
+                        cross_x + arm / 3.0, mid + arm,
+                        fill=CROSS_C, outline="", tags="prop")
+    cv.create_rectangle(cross_x - arm, mid - arm / 3.0,
+                        cross_x + arm, mid + arm / 3.0,
+                        fill=CROSS_C, outline="", tags="prop")
+    # The back doors he is loaded through, and the wheels under it.
+    cv.create_line(_along(v, 0.09, dx), box_top, _along(v, 0.09, dx), axle,
+                   fill=INK, width=2, tags="prop")
+    for u in (0.20, 0.78):
+        _wheel(cv, _along(v, u, dx), axle)
+    bar = sorted((_along(v, 0.70, dx), _along(v, 0.92, dx)))
+    _lightbar(cv, bar[0], bar[1], cab_top, v.t, CROSS_C)
+
+
+def _draw_police(cv, v, dx, dy):
+    """A saloon in the old livery: white body, black doors, lamps on top."""
+    base = v.floor - dy
+    axle = base - WHEEL_R
+    body_top = base - WHEEL_R - CAR_H
+    cab_top = body_top - CAR_CAB
+    cv.create_polygon(_along(v, 0.02, dx), body_top,
+                      _along(v, 0.98, dx), body_top,
+                      _along(v, 1.00, dx), body_top + CAR_H * 0.45,
+                      _along(v, 0.98, dx), axle + 4.0,
+                      _along(v, 0.02, dx), axle + 4.0,
+                      fill=PAPER, outline=INK, width=2, tags="prop")
+    # The cabin, raked at both ends, and the glass inside it.
+    cv.create_polygon(_along(v, 0.30, dx), body_top,
+                      _along(v, 0.41, dx), cab_top,
+                      _along(v, 0.66, dx), cab_top,
+                      _along(v, 0.77, dx), body_top,
+                      fill=PAPER, outline=INK, width=2, tags="prop")
+    cv.create_polygon(_along(v, 0.345, dx), body_top - 2.0,
+                      _along(v, 0.425, dx), cab_top + 3.0,
+                      _along(v, 0.515, dx), cab_top + 3.0,
+                      _along(v, 0.515, dx), body_top - 2.0,
+                      fill=GLASS_C, outline=INK, width=1, tags="prop")
+    cv.create_polygon(_along(v, 0.545, dx), body_top - 1.0,
+                      _along(v, 0.545, dx), cab_top + 3.0,
+                      _along(v, 0.645, dx), cab_top + 3.0,
+                      _along(v, 0.735, dx), body_top - 1.0,
+                      fill=GLASS_C, outline=INK, width=1, tags="prop")
+    # The doors, which are the whole livery: black doors on a white car, the
+    # way a panda car has always been done. Between the arches only - a black
+    # panel that runs over the wings is a black car with white ends.
+    door = sorted((_along(v, 0.33, dx), _along(v, 0.68, dx)))
+    cv.create_rectangle(door[0], body_top, door[1], axle + 1.0,
+                        fill=POLICE_C, outline=INK, width=1, tags="prop")
+    split = (door[0] + door[1]) / 2.0
+    cv.create_line(split, body_top, split, axle + 1.0,
+                   fill=INK, width=1, tags="prop")
+    mid = (body_top + axle + 1.0) / 2.0
+    cv.create_oval(split - 9.0, mid - 4.5, split - 1.0, mid + 4.5,
+                   fill=PAPER, outline=INK, width=1, tags="prop")
+    for u in (0.22, 0.78):
+        _wheel(cv, _along(v, u, dx), axle)
+    bar = sorted((_along(v, 0.44, dx), _along(v, 0.63, dx)))
+    _lightbar(cv, bar[0], bar[1], cab_top, v.t, CROSS_C)
+
+
+def _draw_icecream(cv, v, dx, dy):
+    """A box van got up for sweeter work: awning over the hatch, cone on
+    the roof, and nothing about it in a hurry."""
+    base = v.floor - dy
+    axle = base - WHEEL_R
+    top = base - ICE_H
+    tail, nose = _along(v, 0.0, dx), _along(v, 1.0, dx)
+    cv.create_rectangle(min(tail, nose), top, max(tail, nose), axle,
+                        fill=PAPER, outline=INK, width=2, tags="prop")
+    # The hatch they are served through, on the back half, with its awning.
+    h1, h2 = sorted((_along(v, 0.06, dx), _along(v, 0.44, dx)))
+    cv.create_rectangle(h1, top + 10.0, h2, top + 26.0,
+                        fill=GLASS_C, outline=INK, width=1, tags="prop")
+    stripes = 5
+    for i in range(stripes):
+        a = h1 - 3.0 + (h2 - h1 + 6.0) * i / stripes
+        b = h1 - 3.0 + (h2 - h1 + 6.0) * (i + 1) / stripes
+        cv.create_rectangle(a, top + 2.0, b, top + 9.0,
+                            fill=AWNING_C if i % 2 == 0 else PAPER,
+                            outline=INK, width=1, tags="prop")
+    # The windscreen at the driving end, and the cone up top.
+    cv.create_rectangle(min(nose, _along(v, 0.80, dx)) + 3.0, top + 6.0,
+                        max(nose, _along(v, 0.80, dx)) - 3.0, top + 20.0,
+                        fill=GLASS_C, outline=INK, width=1, tags="prop")
+    cone_x = _along(v, 0.62, dx)
+    cv.create_polygon(cone_x - 5.0, top - 12.0, cone_x + 5.0, top - 12.0,
+                      cone_x, top - 1.0, fill=CONE_C, outline=INK, width=1,
+                      tags="prop")
+    cv.create_oval(cone_x - 6.0, top - 23.0, cone_x + 6.0, top - 11.0,
+                   fill=SCOOP_C, outline=INK, width=1, tags="prop")
+    for u in (0.20, 0.80):
+        _wheel(cv, _along(v, u, dx), axle)
+
+
+def _draw_van(cv, v, dx, dy):
+    """The vehicle, and the two of them walking about beside it."""
+    if v.kind == "medic":
+        _draw_ambulance(cv, v, dx, dy)
+    elif v.kind == "icecream":
+        _draw_icecream(cv, v, dx, dy)
+        return
+    else:
+        _draw_police(cv, v, dx, dy)
+        return
+    if v.phase in ("in", "away"):
+        return
+    # The two of them, out and walking, with the stretcher between them.
+    mid_x = v.door + v.side * v.reach
+    lead = mid_x + v.side * MEDIC_GAP / 2.0
+    back = mid_x - v.side * MEDIC_GAP / 2.0
+    # Facing the way they are walking: out to him, and back to the doors.
+    face = v.side if v.phase in ("out", "load") else -v.side
+    hold = v.floor - STRETCHER_H
+    if v.carry or v.phase == "load":
+        cv.create_rectangle(min(lead, back) - dx, hold - dy - 3.0,
+                            max(lead, back) - dx, hold - dy + 3.0,
+                            fill=PAPER, outline=INK, width=2, tags="prop")
+    step = None if v.phase == "load" else v.reach / 14.0
+    for mx in (lead, back):
+        hand = (mx - dx + face * 12.0, hold - dy)
+        _walker(cv, mx - dx, v.floor - dy - WALK_H, step,
+                COAT, COAT_LIMB, INK, facing=0.62 * face,
+                hands=(hand, hand) if (v.carry or v.phase == "load") else None,
+                tag="prop")
 
 
 def _draw_hut(cv, x, base):
@@ -553,8 +947,8 @@ def show():
 
 def clear():
     """Everything gone. Called when the last of them goes home, and at quit."""
-    global _win, _ball, _hut, _fire
-    _ball = _hut = _fire = None
+    global _win, _ball, _hut, _fire, _van
+    _ball = _hut = _fire = _van = None
     del _wreck[:]
     if _win is not None:
         try:
@@ -614,6 +1008,42 @@ def _demo():
     assert not hut.holds(500.0, 700.0), "and well above the roof is not"
     assert not hut.holds(700.0, 780.0), "nor well off to the side"
     print("ok  the ball falls, bounces, rolls to a stop and stays on screen")
+
+    # The van, phase by phase. Every branch of it is a clock, so it runs
+    # without a screen and it is the one part worth getting wrong.
+    def drive(kind, way):
+        van = _Van(kind, 900.0, 800.0, way, (0.0, 1600.0))
+        legs = []
+        for _ in range(4000):
+            van.step(1.0 / 60.0)
+            if not legs or legs[-1] != van.phase:
+                legs.append(van.phase)
+            if van.gone:
+                break
+        return van, legs
+
+    sweet = _Van("icecream", 900.0, 800.0, 1.0, (0.0, 1600.0))
+    legs = []
+    for i in range(4000):
+        sweet.step(1.0 / 60.0)
+        if not legs or legs[-1] != sweet.phase:
+            legs.append(sweet.phase)
+        if sweet.phase == "serve" and sweet.t > 0.5:
+            sweet.leave()               # the crew's job, done here by hand
+        if sweet.gone:
+            break
+    assert legs == ["in", "serve", "away"], legs
+    assert sweet.gone, "and it goes when it is told"
+
+    van, legs = drive("medic", 1.0)
+    assert legs == ["in", "out", "load", "back", "away"], legs
+    assert van.carry, "somebody has to end up on the stretcher"
+    assert van.gone, "and the whole thing ends with it off the screen"
+    law, legs = drive("police", -1.0)
+    assert legs == ["in", "wait", "away"], legs
+    assert not law.carry, "a police car does not carry anybody off"
+    assert law.gone and law.x < 0.0, "and it leaves the way it was pointed"
+    print("ok  the van drives on, does its one thing and drives off")
 
 
 if __name__ == "__main__":
