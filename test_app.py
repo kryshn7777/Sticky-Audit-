@@ -120,6 +120,14 @@ def main():
     # can look at it.
     assert app.store.settings["quick_capture"], "on by default"
     assert app.hotkey.hwnd, "and it owns a window to be told through"
+    # Every argument declared, or ctypes passes the module handle as a C int
+    # and the app dies on start - but only on the boots where Windows happened
+    # to load it above 2GB, which is why this is checked and not just run.
+    make = app_module.winkit._user32().CreateWindowExW
+    assert make.argtypes is not None, (
+        "an argument left undeclared goes across as an int")
+    assert ctypes.sizeof(make.argtypes[10]) == ctypes.sizeof(ctypes.c_void_p), (
+        "and hInstance is a whole address, not half of one")
     before = len(app.store.notes)
     winkit_mod = app_module.winkit
     _wt = ctypes.wintypes
@@ -756,6 +764,15 @@ def main():
     assert sheet(window) == was_at, "and it goes back where it was"
     app.tracker.register(figure)
     figure.hush()
+    # The face survives a squash: it is a rounded twelve-point polygon, and
+    # a reaction that fed coords() two corners used to collapse it to a
+    # sliver - a mascot with eyes and no box.
+    figure._face_scale = (1.3, 0.7)
+    figure._apply_face()
+    assert len(figure.cv.coords(figure._face_item)) >= 24, \
+        "the squashed face is still the whole rounded box"
+    figure._face_scale = (1.0, 1.0)
+    figure._apply_face()
     print("ok  tapping him reacts, dragging him picks him up, the note stays put")
 
     # --- switching him off gives the space back -------------------------------
@@ -921,6 +938,18 @@ def main():
     # really would hurt can be: a timer left running when nobody has picked him
     # up, and an arm that has quietly stopped being an arm.
     roamer.STEP = 1.0 / 60.0            # pinned, so the physics repeats exactly
+    # ...and nothing is full-screen as far as the crew is concerned. Whatever
+    # the suite is being watched in is a window over the top of it, and a
+    # maximised one would send them off the bar in the middle of a check that
+    # is about something else entirely. The check that is about it puts its
+    # own answer in for as long as it needs one.
+    roamer.winkit.foreground_fullscreen = lambda: False
+    roamer.shy = False
+    # ...and nobody starts anything on his own while the suite is looking at
+    # something else. A scrap out of nowhere in the middle of the errand for
+    # wood is a check that fails once a fortnight for a reason nobody can
+    # reproduce. The checks that are about it turn it back on.
+    roamer.SPONTANEOUS = False
 
     def steps(n, stop=None):
         """Exactly n steps of the crew, and no others.
@@ -1008,7 +1037,16 @@ def main():
 
         # thrown, and he falls, bounces off the side of the screen, and
         # arrives on the taskbar
-        guy = roamer.Roamer(app, window, right - 60.0, floor - 300.0)
+        # Clear of the paper as well as high up. A note that has grown to its
+        # limit is wider than a small work area, so the corner it was parked
+        # in reaches all the way across the throw - and a man dropped on a
+        # sheet takes hold of it rather than falling off it.
+        under = max([paper.winfo_rooty() + paper.winfo_height()
+                     for paper in app.windows.values()] or [0.0])
+        drop = min(max(floor - 300.0,
+                       under + roamer.GRAB_NEAR + roamer.STAND_H + 40.0),
+                   floor - 20.0)
+        guy = roamer.Roamer(app, window, right - 60.0, drop)
         assert roamer._job is not None, "somebody out there needs a timer"
         guy.let_go()
         assert guy.state == "fall", guy.state
@@ -1134,6 +1172,620 @@ def main():
         for one in near:
             one.vanish()
         print("ok  two of them on one spot make room for each other")
+
+        # every mood, and every act any of them can be asked to do
+        mover = roamer.Roamer(app, window, left + 500.0, floor)
+        mover.floor, mover.y = floor, floor
+        mover.vx = mover.vy = 0.0
+        mover._begin("rest", roamer._time())
+
+        for mood in roamer.MOODS:
+            assert mover.feel(mood), mood
+            crank(2)
+            assert mover.mood == mood, (mood, mover.mood)
+            assert mover.face == mascot_mod._face_mix(
+                mover.face, mascot_mod.FACES[roamer.MOOD_FACE[mood]], 0.0), \
+                "the mood is a face, not a state"
+        assert not mover.feel("peckish"), "and only the four are moods"
+        mover.mood = None
+
+        for what in ("sing", "phone", "call", "beaten", "clap", "dance"):
+            assert roamer.act(mover, what), what
+            crank(3)
+            assert mover.state in ("sing", "phone", "beaten", "clap",
+                                   "dance"), (what, mover.state)
+            assert mover.hands is not None, ("something has to be drawn", what)
+            if what in ("phone", "call"):
+                assert mover.prop == "phone", what
+            lasts = roamer.ACTS[what] or roamer.ACTS["sing"]
+            crank(int(lasts / roamer.STEP) + 10)
+            assert mover.state == "rest", (
+                "and he has to come back out of it", what, mover.state)
+            assert mover.prop is None, ("and put the phone away", what)
+        assert not roamer.act(mover, "juggle"), "only what is in ACTS"
+
+        assert roamer.act(mover, "celebrate") and mover.state == "cheer"
+        crank(int(roamer.CHEER_S / roamer.STEP) + 10)
+        assert roamer.act(mover, "sleep") and mover.state == "sleep"
+        mover._begin("rest", roamer._time())
+
+        # a scrap: one of them ends up celebrating and one sat down
+        other = roamer.Roamer(app, second, left + 560.0, floor)
+        other.floor, other.y = floor, floor
+        other.vx = other.vy = 0.0
+        other._begin("rest", roamer._time())
+        assert roamer.scrap(mover, other)
+        crank(3)
+        assert mover.state == other.state == "fight", (mover.state, other.state)
+        assert mover.mood == "angry" and other.mood == "angry"
+        crank(int(roamer.ACTS["fight"] / roamer.STEP) + 20)
+        ends = sorted((mover.state, other.state))
+        assert ends == ["beaten", "cheer"], ("one wins, one does not", ends)
+        assert not roamer.scrap(mover, mover), "and nobody fights himself"
+
+        # a run on his own, and then a chase: one after the other
+        for one in (mover, other):
+            one.mood = None
+            one._begin("rest", roamer._time())
+        assert roamer.act(mover, "run") and mover.state == "run"
+        crank(3)
+        assert mover.hands is not None, "something has to be drawn while he runs"
+        was = mover.x
+        crank(10)
+        assert mover.x != was, "and running has to move him"
+        crank(int(roamer.ACTS["run"] / roamer.STEP) + 10)
+        assert mover.state == "rest", ("and he has to stop", mover.state)
+
+        mover.x, other.x = left + 500.0, left + 560.0
+        assert roamer.chase(mover, other)
+        crank(3)
+        assert mover.state == other.state == "run", (mover.state, other.state)
+        assert (mover._run_leg, other._run_leg) == ("after", "away")
+        crank(20)
+        assert abs(mover.x - other.x) >= roamer.CHASE_GAP, (
+            "the one behind holds off rather than standing on him",
+            mover.x, other.x)
+        crank(int(roamer.ACTS["run"] / roamer.STEP) + 20)
+        assert mover.state == other.state == "rest", (mover.state, other.state)
+        assert mover._foe is None and other._foe is None, "and nobody is left on"
+        assert not roamer.chase(mover, mover), "and nobody chases himself"
+
+        # started on for no reason at all: he is baffled first, and then he
+        # either has a go back or walks off wondering what that was about
+        was_random = roamer.random.random
+        for pick, ends in ((0.0, "fight"), (0.99, "walk")):
+            for one in (mover, other):
+                one._foe = None
+                one.mood = None
+                one._begin("rest", roamer._time())
+            mover.x, other.x = left + 500.0, left + 540.0
+            roamer.random.random = lambda: pick
+            try:
+                assert roamer.provoke(mover, other)
+                crank(3)
+                assert mover.state == "provoke" and other.state == "baffled", (
+                    mover.state, other.state)
+                assert other.hands is not None, "he has to be shown asking why"
+                assert other.face == mascot_mod.FACES["wtf"], (
+                    "and it has to be on his face, not just in his state")
+                crank(int(roamer.SHOVE_S / roamer.STEP) + 20)
+                if ends == "fight":
+                    assert mover.state == other.state == "fight", (
+                        "one who has had enough gives it back",
+                        mover.state, other.state)
+                    crank(int(roamer.ACTS["fight"] / roamer.STEP) + 20)
+                else:
+                    assert other.state in ("walk", "rest"), (
+                        "and one who has not walks off", other.state)
+                    assert other.mood == "sad", "wondering what that was about"
+                    assert mover.state != "fight", mover.state
+            finally:
+                roamer.random.random = was_random
+        assert not roamer.provoke(mover, mover), "and nobody starts on himself"
+        for one in (mover, other):
+            one._foe = None
+            one.mood = None
+            one._begin("rest", roamer._time())
+        for one in (mover, other):
+            one.vanish()
+        print("ok  four moods, and everything any of them can be asked to do")
+
+        # Somebody is on the floor, somebody else sees it, and an ambulance
+        # turns up for him: the call, the van, the lift, and the man gone
+        # with it. Driven on the real clock rather than poked into place -
+        # every one of those hands off to the next, and the handover is the
+        # part worth checking.
+        roamer.SPONTANEOUS = True
+        try:
+            # First, the thing that starts all of this: one of them takes
+            # against another for no reason at all. The clock is wound to
+            # nothing so the suite does not wait a minute and a half for it.
+            was_every, roamer.ANGER_EVERY = roamer.ANGER_EVERY, (0.0, 0.0)
+            roamer._anger_at = 0.0
+            try:
+                mad = roamer.Roamer(app, window, left + 400.0, floor)
+                poor = roamer.Roamer(app, second, left + 500.0, floor)
+                for guy in (mad, poor):
+                    guy.floor, guy.y = floor, floor
+                    guy.vx = guy.vy = 0.0
+                    guy._begin("rest", roamer._time())
+                went = crank(60 * 4, lambda: mad.state in ("provoke", "baffled"))
+                assert went is not None, (
+                    "somebody has to start something eventually",
+                    mad.state, poor.state)
+                assert sorted((mad.state, poor.state)) ==                     ["baffled", "provoke"], (mad.state, poor.state)
+                for guy in (mad, poor):
+                    guy.vanish()
+            finally:
+                roamer.ANGER_EVERY = was_every
+                roamer._anger_at = 0.0
+            print("ok  one of them takes against another off his own bat")
+
+            # A song, and everybody near enough joining in. Nobody is told
+            # what to do here beyond the singing: who claps and who dances
+            # is theirs, and the point of the check is that the whole thing
+            # starts and stops as one.
+            singer = roamer.Roamer(app, window, left + 420.0, floor)
+            crowd = [roamer.Roamer(app, second, left + 520.0, floor),
+                     roamer.Roamer(app, window, left + 600.0, floor)]
+            for guy in [singer] + crowd:
+                guy.floor, guy.y = floor, floor
+                guy.vx = guy.vy = 0.0
+                guy._begin("rest", roamer._time())
+            assert roamer.act(singer, "sing")
+            joined = crank(60 * 3, lambda: all(guy.state in ("clap", "dance")
+                                               for guy in crowd))
+            assert joined is not None, (
+                "nobody sings at nobody", [guy.state for guy in crowd])
+            for guy in crowd:
+                assert guy.hands is not None, ("and it has to be drawn",
+                                               guy.state)
+                assert abs(guy._until - singer._until) < 0.001, (
+                    "they stop when he does, not one at a time")
+            crank(int(roamer.ACTS["sing"] / roamer.STEP) + 20)
+            if not all(guy.state == "rest" for guy in [singer] + crowd):
+                now = roamer._time()
+                print("DEBUG song_at-now", round(roamer._song_at - now, 2),
+                      "anger_at-now", round(roamer._anger_at - now, 2))
+                for tag, guy in [("singer", singer)] + [
+                        ("crowd%d" % i, g) for i, g in enumerate(crowd)]:
+                    print("DEBUG", tag, guy.state,
+                          "until-now", round(guy._until - now, 2),
+                          "since-now", round(guy.since - now, 2))
+            assert all(guy.state == "rest" for guy in [singer] + crowd), (
+                "and the song ends as one thing",
+                [guy.state for guy in [singer] + crowd])
+            for guy in [singer] + crowd:
+                guy.vanish()
+            print("ok  one starts singing and the rest clap or dance to it")
+
+            hurt = roamer.Roamer(app, window, left + 420.0, floor)
+            witness = roamer.Roamer(app, second, left + 560.0, floor)
+            for one in (hurt, witness):
+                one.floor, one.y = floor, floor
+                one.vx = one.vy = 0.0
+                one._begin("rest", roamer._time())
+            hurt._begin("beaten", roamer._time())
+            crank(4)
+            assert witness.state == "help", (
+                "somebody has to see it and do something about it",
+                witness.state)
+            came = crank(60 * 14, lambda: roamer.yard.van() is not None)
+            assert came is not None, "and something has to turn up"
+            assert roamer.yard.van().kind == "medic", roamer.yard.van().kind
+            assert witness.prop is None or witness.state == "help"
+            lifted = crank(60 * 14, lambda: hurt.state == "carted")
+            assert lifted is not None, (
+                "they have to get him onto the stretcher", hurt.state)
+            assert abs(hurt.roll) > 1.0, "and he is lying on it, not stood on it"
+            away = crank(60 * 25, lambda: hurt not in roamer.crew)
+            assert away is not None, ("and it takes him away with it",
+                                      hurt.state, roamer.yard.van())
+            witness.vanish()
+            roamer.yard.send_off()
+            print("ok  he is picked up off the floor and driven away")
+
+            # ...and a scrap that somebody calls the police to instead. The
+            # fight is given long enough to still be going when they arrive:
+            # a police car that pulls up after it is over is a police car
+            # nobody sees.
+            was_odds = roamer.POLICE_ODDS
+            roamer.POLICE_ODDS = 1.0
+            roamer._scrap_seen = None
+            try:
+                one = roamer.Roamer(app, window, left + 380.0, floor)
+                two = roamer.Roamer(app, second, left + 440.0, floor)
+                seen = roamer.Roamer(app, window, left + 620.0, floor)
+                for guy in (one, two, seen):
+                    guy.floor, guy.y = floor, floor
+                    guy.vx = guy.vy = 0.0
+                    guy._begin("rest", roamer._time())
+                assert roamer.scrap(one, two, seconds=40.0)
+                crank(4)
+                assert seen.state == "help", (
+                    "the third man phones it in", seen.state)
+                blue = crank(60 * 14, lambda: roamer.yard.van() is not None)
+                assert blue is not None, "and a car has to come"
+                assert roamer.yard.van().kind == "police"
+                bolt = crank(60 * 6, lambda: one.state == two.state == "run")
+                assert bolt is not None, (
+                    "and the two of them do not stay to explain it",
+                    one.state, two.state)
+                assert one._run_leg == two._run_leg == "off"
+                out = crank(60 * 20,
+                            lambda: one not in roamer.crew
+                            and two not in roamer.crew)
+                assert out is not None, (
+                    "they go off the screen entirely", one.x, two.x)
+                car = roamer.yard.van()
+                assert car is None or car.phase == "away", (
+                    "and the car does not sit there once they have gone")
+                seen.vanish()
+                roamer.yard.send_off()
+            finally:
+                roamer.POLICE_ODDS = was_odds
+        finally:
+            roamer.SPONTANEOUS = False
+        print("ok  a scrap gets called in, and everybody leaves in a hurry")
+
+        # what is written on the note colours the man who lives on it
+        assert roamer.temper_of("so angry and MAD about all of it") == "angry"
+        assert roamer.temper_of("made a list of groceries") is None,             "whole words, or every 'made' is a temper"
+        assert roamer.temper_of("sad and lonely") == "sad"
+        assert roamer.temper_of("what a happy lovely day") == "happy"
+        assert roamer.temper_of("tired, nap soon") == "sleepy"
+
+        roamer.SPONTANEOUS = True
+        try:
+            bully = roamer.Roamer(app, window, left + 480.0, floor)
+            meek = roamer.Roamer(app, second, left + 540.0, floor)
+            for guy in (bully, meek):
+                guy.floor, guy.y = floor, floor
+                guy.vx = guy.vy = 0.0
+                guy._begin("rest", roamer._time())
+
+            # An angry note answers a shove every time, whatever the dice say.
+            was_random = roamer.random.random
+            roamer.random.random = lambda: 0.5
+            try:
+                meek.temper = "angry"
+                assert roamer.provoke(bully, meek)
+                crank(int(roamer.SHOVE_S / roamer.STEP) + 20)
+                assert bully.state == meek.state == "fight", (
+                    "an angry note always answers", bully.state, meek.state)
+                for guy in (bully, meek):
+                    guy._foe = None
+                    guy.mood = None
+                    guy.temper = None
+                    guy._begin("rest", roamer._time())
+
+                # ...and a sad one never does.
+                meek.temper = "sad"
+                assert roamer.provoke(bully, meek)
+                crank(int(roamer.SHOVE_S / roamer.STEP) + 20)
+                assert meek.state not in ("fight", "beaten"), (
+                    "a sad note never answers", meek.state)
+                assert bully.state != "fight", bully.state
+                assert meek.mood == "sad", "and it shows on him"
+            finally:
+                roamer.random.random = was_random
+
+            # The wiring from the sheet: retype the note and he re-reads it.
+            bully.mood = None
+            assert roamer.retune(bully.home_id,
+                                 "FURIOUS about everything") == "angry"
+            assert bully.temper == "angry" and bully.mood == "angry"
+            assert roamer.retune(bully.home_id, "calm seas") is None
+            assert bully.temper is None
+
+            # A sad man does not stay to watch a scrap: he runs from it.
+            for guy in (bully, meek):
+                guy._foe = None
+                guy.mood = None
+                guy.temper = None
+                guy._begin("rest", roamer._time())
+            meek.temper = "sad"
+            meek.x = left + 600.0
+            third = roamer.Roamer(app, window, left + 500.0, floor)
+            third.floor, third.y = floor, floor
+            third.vx = third.vy = 0.0
+            third._begin("rest", roamer._time())
+            assert roamer.scrap(bully, third, seconds=10.0)
+            fled = crank(60 * 3, lambda: meek.state == "run")
+            assert fled is not None, ("the sad one runs from it", meek.state)
+            crank(60 * 5)
+            for guy in (bully, meek, third):
+                if guy in roamer.crew:
+                    guy._foe = None
+                    guy._begin("rest", roamer._time())
+                    guy.vanish()
+        finally:
+            roamer.SPONTANEOUS = False
+        print("ok  the words on the note decide who fights and who runs")
+
+        # The fun: five things that happen for no reason except that they
+        # are funny. Each check winds only its own clock; every other
+        # spontaneous clock is pinned out past the end of the suite.
+        far = roamer._time() + 9999.0
+        roamer._song_at = roamer._anger_at = far
+        roamer._pounce_at = roamer._race_at = far
+        roamer._ice_at = roamer._pile_at = far
+
+        # 1. The pointer, stalked: creep, wiggle, pounce, and the miss.
+        roamer.SPONTANEOUS = True
+        was_pointer = roamer._pointer
+        try:
+            cat = roamer.Roamer(app, window, left + 400.0, floor)
+            cat.floor, cat.y = floor, floor
+            cat.vx = cat.vy = 0.0
+            cat._begin("rest", roamer._time())
+            prey = (int(left + 550.0), int(floor))
+            roamer._pointer = lambda: prey
+            roamer._pounce_at = roamer._time()
+            crept = crank(60 * 3, lambda: cat.state == "stalk")
+            assert crept is not None, ("the pointer catches his eye", cat.state)
+            pounced = crank(60 * 12, lambda: cat.state == "fall")
+            assert pounced is not None, ("and he goes for it", cat.state,
+                                         cat._stalk_leg)
+            assert cat.mood == "happy", "having the time of his life"
+            landed = crank(60 * 10, lambda: cat.state == "rest")
+            assert landed is not None, ("he lands and pretends nothing",
+                                        cat.state)
+            cat.vanish()
+        finally:
+            roamer._pointer = was_pointer
+            roamer._pounce_at = far
+        print("ok  one of them stalks the pointer, pounces, and misses")
+
+        # 2. Race day, run clean: the line-up, the gun, and the result.
+        # The switch goes off for the races so the man who trips is not
+        # carried off by an ambulance mid-check; the referee runs regardless.
+        roamer.SPONTANEOUS = False
+        was_random = roamer.random.random
+        roamer.random.random = lambda: 0.9      # nobody trips today
+        try:
+            field = [roamer.Roamer(app, window, left + 380.0, floor),
+                     roamer.Roamer(app, second, left + 460.0, floor),
+                     roamer.Roamer(app, window, left + 540.0, floor)]
+            for guy in field:
+                guy.floor, guy.y = floor, floor
+                guy.vx = guy.vy = 0.0
+                guy._begin("rest", roamer._time())
+            assert roamer.race()
+            assert all(guy.state == "race" for guy in field)
+            off = crank(60 * 20, lambda: any(guy._race_leg == "out"
+                                             for guy in field))
+            assert off is not None, ("the gun has to go",
+                                     [guy._race_leg for guy in field])
+            won = crank(60 * 40, lambda: any(guy.state == "cheer"
+                                             for guy in field))
+            assert won is not None, ("somebody comes home first",
+                                     [(guy.state, guy._race_leg)
+                                      for guy in field])
+            first = next(guy for guy in field if guy.state == "cheer")
+            assert all(guy.state == "clap" for guy in field
+                       if guy is not first), (
+                "and the rest are good sports about it",
+                [guy.state for guy in field])
+            assert not roamer._racers, "the race is over when it is over"
+            crank(60 * 4)
+            for guy in field:
+                guy._begin("rest", roamer._time())
+                guy.vanish()
+        finally:
+            roamer.random.random = was_random
+        print("ok  three of them race down the bar and back")
+
+        # ...and run dirty: somebody goes over at full tilt, and once he
+        # stops bouncing it hurts.
+        roamer.random.random = lambda: 0.0      # somebody is going over
+        try:
+            field = [roamer.Roamer(app, window, left + 380.0, floor),
+                     roamer.Roamer(app, second, left + 460.0, floor),
+                     roamer.Roamer(app, window, left + 540.0, floor)]
+            for guy in field:
+                guy.floor, guy.y = floor, floor
+                guy.vx = guy.vy = 0.0
+                guy._begin("rest", roamer._time())
+            assert roamer.race()
+            down = crank(60 * 40, lambda: any(guy.state == "beaten"
+                                              for guy in field))
+            assert down is not None, ("the trip has to land him in a heap",
+                                      [(guy.state, guy._race_trip_at)
+                                       for guy in field])
+            assert roamer._race_tripped is None, "and the referee saw it"
+            crank(60 * 4)
+            for guy in field:
+                if guy in roamer.crew:
+                    guy._begin("rest", roamer._time())
+                    guy.vanish()
+        finally:
+            roamer.random.random = was_random
+        print("ok  a race with a fall in it ends with a man on the floor")
+
+        roamer.SPONTANEOUS = True
+        # 3. The nap pile: two sleepy notes find each other and go down in
+        # a heap, heads together. The clock fires twice, the way it does in
+        # the wild: once to gather them, once to put them down.
+        dozy = [roamer.Roamer(app, window, left + 380.0, floor),
+                roamer.Roamer(app, second, left + 560.0, floor)]
+        for guy in dozy:
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy.temper = "sleepy"
+            guy._begin("rest", roamer._time())
+            # No chat scenes muscling in on the nap: the pile clock fires
+            # twice here and a chat between the two firings starves it.
+            guy._social_until = roamer._time() + 999.0
+        roamer._pile_at = roamer._time()
+        met = crank(60 * 8, lambda: all(guy.state in ("rest", "chat")
+                                        for guy in dozy)
+                    and abs(dozy[0].x - dozy[1].x) < roamer.PILE_R)
+        assert met is not None, ("they have to find each other",
+                                 [(guy.state, round(guy.x)) for guy in dozy])
+        roamer._pile_at = roamer._time()
+        piled = crank(60 * 2, lambda: all(guy.state == "sleep"
+                                          for guy in dozy))
+        assert piled is not None, ("and go down in a heap",
+                                   [(guy.state, round(guy.x)) for guy in dozy])
+        crank(4)
+        assert dozy[0].roll != 0.0 and dozy[1].roll != 0.0, (
+            "and the heads go together", dozy[0].roll, dozy[1].roll)
+        assert (dozy[0].roll > 0) != (dozy[1].roll > 0), (
+            "towards each other, not the same way")
+        roamer._pile_at = far
+        for guy in dozy:
+            guy.temper = None
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        print("ok  two sleepy notes nap in a pile, heads together")
+
+        # 4. The ice cream van: it turns up, they queue, everybody gets a
+        # cone, and it leaves when the queue is done.
+        sweet = [roamer.Roamer(app, window, left + 400.0, floor),
+                 roamer.Roamer(app, second, left + 480.0, floor)]
+        for guy in sweet:
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy._begin("rest", roamer._time())
+        roamer._ice_at = roamer._time()
+        came = crank(60 * 4, lambda: roamer.yard.van() is not None)
+        assert came is not None, "the van has to come"
+        assert roamer.yard.van().kind == "icecream"
+        roamer._ice_at = far                    # one van is plenty
+        queued = crank(60 * 20, lambda: any(guy.state == "queue"
+                                            for guy in sweet))
+        assert queued is not None, ("and they queue at it",
+                                    [guy.state for guy in sweet])
+        served = crank(60 * 20, lambda: any(guy.state == "lick"
+                                            for guy in sweet))
+        assert served is not None, ("the front of the queue gets his",
+                                    [guy.state for guy in sweet])
+        front = next(guy for guy in sweet if guy.state == "lick")
+        assert front.prop == "cone", "and it is drawn in his hand"
+        gone = crank(60 * 40, lambda: roamer.yard.van() is None
+                     and all(guy.prop is None for guy in sweet))
+        assert gone is not None, ("everybody served, and off it goes",
+                                  [(guy.state, guy.prop) for guy in sweet],
+                                  roamer.yard.van())
+        for guy in sweet:
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        roamer.yard.send_off()
+        print("ok  the ice cream van serves the queue and drives off")
+
+        # 5. A birthday on the note is a party: hats, a song, and the man
+        # himself up celebrating - once per birthday, not once per keystroke.
+        host = roamer.Roamer(app, window, left + 420.0, floor)
+        guest = roamer.Roamer(app, second, left + 520.0, floor)
+        for guy in (host, guest):
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy._begin("rest", roamer._time())
+        roamer.retune(host.home_id, "happy birthday!!")
+        assert host.state == "cheer", ("his own party, celebrated",
+                                       host.state)
+        assert host._bday_done, "and it is marked as had"
+        now = roamer._time()
+        assert host._hat_until > now and guest._hat_until > now, (
+            "hats for everybody at the party")
+        assert guest.state == "sing", ("somebody strikes up the song",
+                                       guest.state)
+        # Retyping the same word is not a second party.
+        host._begin("rest", roamer._time())
+        guest._begin("rest", roamer._time())
+        roamer.retune(host.home_id, "happy birthday again")
+        assert host.state == "rest", "the word staying is not the word arriving"
+        # ...but a fresh one, after the word has gone, is.
+        roamer.retune(host.home_id, "plain list of jobs")
+        assert not host._bday_done
+        roamer.retune(host.home_id, "bday next week")
+        assert host.state == "cheer", "a fresh birthday is a fresh party"
+        crank(4)
+        for guy in (host, guest):
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        print("ok  a birthday on the note throws a party, once")
+
+        # An angry note is not much fun at parties: mostly he wants no part
+        # of anything but a scrap, and says so. The dice decide, so both
+        # answers are pinned and checked.
+        stage = roamer.Roamer(app, window, left + 420.0, floor)
+        grump = roamer.Roamer(app, second, left + 500.0, floor)
+        for guy in (stage, grump):
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy._begin("rest", roamer._time())
+        grump.temper = "angry"
+        was_random = roamer.random.random
+        roamer.random.random = lambda: 0.0      # the "no" side of the roll
+        try:
+            assert roamer.act(stage, "sing")
+            crank(30)
+            assert grump.state == "rest", ("he wants no part of it",
+                                           grump.state)
+            assert grump._grump_until > roamer._time(), (
+                "and the no is remembered, not re-rolled")
+            stage._begin("rest", roamer._time())
+            grump._grump_until = 0.0
+            grump.mood = None
+            roamer.random.random = lambda: 0.9  # ...and the rare "yes"
+            assert roamer.act(stage, "sing")
+            joined = crank(60 * 2, lambda: grump.state == "dance")
+            assert joined is not None, ("even a grump has his days",
+                                        grump.state)
+        finally:
+            roamer.random.random = was_random
+        for guy in (stage, grump):
+            guy.temper = None
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        print("ok  an angry note mostly turns the fun down")
+
+        # A pizza on the note is an errand and then a picnic: off the edge,
+        # back with the box, and everybody near enough sits down to a slice.
+        host = roamer.Roamer(app, window, left + 300.0, floor)
+        mate = roamer.Roamer(app, second, left + 420.0, floor)
+        for guy in (host, mate):
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy._begin("rest", roamer._time())
+            guy._social_until = roamer._time() + 999.0
+        roamer.retune(host.home_id, "pizza tonight")
+        assert host.state == "errand", ("his stomach, his errand", host.state)
+        gone = crank(60 * 20, lambda: host._fetch == "back")
+        assert gone is not None, ("he has to go off the edge",
+                                  host.x, host._fetch)
+        x1, x2 = host._walls()
+        assert (host.x <= x1 - roamer.FETCH_OFF + 2.0
+                or host.x >= x2 + roamer.FETCH_OFF - 2.0), (
+            "properly off it, not loitering", host.x)
+        back = crank(60 * 20, lambda: host.state == "picnic")
+        assert back is not None, ("and come back with the box",
+                                  host.state, host._fetch)
+        assert host.prop == "pizza_open", host.prop
+        joined = crank(60 * 6, lambda: mate.state == "picnic")
+        assert joined is not None, ("nobody eats alone", mate.state)
+        seated = crank(60 * 8, lambda: mate.hands is not None
+                       and mate.feet is not None)
+        assert seated is not None, "sat down to it, not stood over it"
+        over = crank(int(roamer.PICNIC_S / roamer.STEP) + 90,
+                     lambda: host.state == mate.state == "rest")
+        assert over is not None, ("and it ends as one thing",
+                                  host.state, mate.state)
+        assert host.prop is None, "the box does not outlive the picnic"
+        # One pizza per typing: the word still on the sheet orders nothing.
+        roamer.retune(host.home_id, "pizza again, still hungry")
+        assert host.state == "rest", ("the word staying is not an order",
+                                      host.state)
+        for guy in (host, mate):
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        roamer.SPONTANEOUS = False
+        roamer._song_at = roamer._anger_at = 0.0
+        roamer._pounce_at = roamer._race_at = 0.0
+        roamer._ice_at = roamer._pile_at = 0.0
+        print("ok  a pizza on the note fetches a box and seats a picnic")
 
         # something goes full-screen and they get off the bar until it is over
         assert roamer.winkit.covers((0, 0, 1280, 768), (0, 0, 1280, 768)), (
@@ -1741,6 +2393,18 @@ def main():
         step(60)
         assert abs(finder.x - talk.mid) < was - 20.0,             ("he has to be closing the gap", was, abs(finder.x - talk.mid))
         step(300, lambda: finder.scene is not None)
+        if finder.scene is None or finder.scene.kind != "mock":
+            print("DEBUG mock: finder", finder.state, round(finder.x, 1),
+                  "nosy", finder._nosy, "social_until-now",
+                  round(finder._social_until - roamer._time(), 1))
+            print("DEBUG scenes", [(s.kind, round(s.mid, 1),
+                                    [round(g.x, 1) for g in s.cast])
+                                   for s in roamer.scenes])
+            print("DEBUG pair", a.state, round(a.x, 1),
+                  None if a.scene is None else a.scene.kind,
+                  "|", b.state, round(b.x, 1),
+                  None if b.scene is None else b.scene.kind,
+                  "| talk.kind", talk.kind, "mid", round(talk.mid, 1))
         assert finder.scene is not None and finder.scene.kind == "mock",             "and edging in has to get him laughed at"
         assert finder.scene.victim is finder, "he is the one they turn on"
         finder.vanish()

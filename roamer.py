@@ -72,6 +72,7 @@ of them going home takes the yard's window with it.
 
 import math
 import random
+import re
 import time
 import tkinter as tk
 
@@ -164,7 +165,8 @@ SPACE_PUSH = 1.0        # px a frame of shuffling, so it reads as making room
 # window, "leave" is a jump off the bar, and "enter" is a queue at one door -
 # shoving them apart there stops them ever reaching it.
 SPACE_STATES = ("rest", "walk", "sleep", "chat", "watch", "panic", "stomp",
-                "bye", "wtf", "fetch", "cheer", "vigil")
+                "bye", "wtf", "fetch", "cheer", "vigil", "sing", "phone",
+                "beaten")
 # ...but only these are moved by it. A man on his way somewhere is not shoved
 # off his line: he makes the other one make room and carries on. Both of them
 # giving way deadlocks an errand - two of them walking the wood home from the
@@ -173,7 +175,8 @@ SPACE_STATES = ("rest", "walk", "sleep", "chat", "watch", "panic", "stomp",
 # hut never went up.
 # A man sitting with a note is not moved off his fire either: he is where he
 # is for twenty-five minutes, and the others can walk round him.
-SPACE_SHUFFLE = ("rest", "sleep", "chat", "watch", "wtf", "cheer")
+SPACE_SHUFFLE = ("rest", "sleep", "chat", "watch", "wtf", "cheer", "sing",
+                 "phone", "beaten")
 
 # ---------------------------------------------------------------- taking hold
 GRAB_NEAR = 90.0        # how near an edge he has to land to take hold of it
@@ -314,11 +317,308 @@ PANIC_TURN = 0.45       # he changes his mind about which way this often
 PANIC_SPEED = WALK_SPEED * 2.6
 HUT_SPILL = 34.0        # how far apart they come out
 
+# ------------------------------------------------------------- a bit of a run
+# Running: on his own, or after somebody who is running from him. One set of
+# numbers for both, because they are the same legs - all that changes is who
+# picks the direction. He turns at the walls rather than stopping at them, so
+# a chase that reaches the end of the bar comes back down it instead of
+# ending in a corner.
+RUN_S = 6.0
+RUN_SPEED = WALK_SPEED * 2.4
+RUN_LEAN = 5.0          # further over than a stomp: he is leaning into it
+RUN_BOB = 3.0           # ...and how far each stride throws him off the floor
+CHASE_GAP = 34.0        # the one behind holds off rather than standing on him
+
 WTF_ABOVE = 46.0        # his head this far over mine before it counts
 WTF_NEAR = 200.0        # ...and still near enough that it is about me
 WTF_HOLD = 0.22         # held this long, so a flick past does not trip it
 WTF_S = 1.6
 WTF_TURN = 8.0          # frames to come round and face the front
+
+# ---------------------------------------------------------------- how he feels
+# A mood is a face held over whatever else he is doing, the way the anger
+# after being laughed at already outlives the stomping off. Four of them, by
+# name, because that is what the rest of the app wants to say: he is happy,
+# sad, angry, sleepy. Anything that wants him to look a particular way asks
+# for a mood rather than reaching into FACES.
+MOOD_FACE = {"happy": "happy", "sad": "sad", "angry": "cross", "sleepy": "dozy"}
+MOODS = tuple(MOOD_FACE)
+MOOD_S = 25.0           # how long one colours him for
+MOOD_MIX = 0.75         # ...and how much of his face it takes over
+
+# --------------------------------------------------------------- what he can do
+# Everything any of them can be asked to perform, and how long it lasts. The
+# names are the app's vocabulary: act(guy, "sing"). "sleep" and "celebrate"
+# are here too even though they were already states, so that a caller never
+# has to know which of these existed first.
+ACTS = {
+    "sleep": None,          # until something wakes him
+    "celebrate": None,      # CHEER_S, from the state itself
+    "sing": 7.0,
+    "fight": 4.5,
+    "beaten": 5.0,
+    "phone": 9.0,           # typing on it
+    "call": 9.0,            # ...and talking into it
+    "run": RUN_S,           # on his own; chase() is two of them
+    "clap": None,           # both of these run as long as the song does
+    "dance": None,
+}
+SING_LINES = ("\u266a", "\u266b")     # what floats over his head while he sings
+
+# ------------------------------------------------------------- and the rest
+# Nobody sings at nobody. Whoever is near enough to hear it joins in - some
+# of them clap along and some of them dance, and both last exactly as long as
+# the song does, so it ends the way it started rather than trailing off one
+# man at a time.
+SONG_EVERY = (70.0, 160.0)      # how often one of them starts one
+SONG_NEAR = 300.0               # how far off it is worth listening to
+CLAP_ODDS = 0.55                # ...and how many of them clap rather than dance
+CLAP_HZ = 2.2                   # the beat, and everything is on it
+CLAP_REACH = 15.0               # how far apart his hands get between claps
+DANCE_HZ = 1.1
+DANCE_STEP = 15.0               # how far the dance takes him either way
+DANCE_HOP = 5.0                 # ...and how far off the floor
+PHONE_W, PHONE_H = 9.0, 15.0
+PHONE_C = "#2A241C"
+SWING_HZ = 5.5          # how fast a scrap goes
+DUST_R = 9.0            # ...and how far the scuffle throws him about
+
+# ------------------------------------------------------ starting on somebody
+# One of them takes against another for no reason either of them could name.
+# He comes over, squares up and jabs at the air in front of the other man's
+# face - all threat and no contact, the same cartoon rules a scrap runs on.
+# What comes back is the other man's business: he is baffled first, and then
+# he either walks off wondering what that was about or he has had enough of
+# it and there is a scrap after all.
+PROVOKE_NEAR = 46.0             # how close he comes before he starts
+PROVOKE_SPEED = WALK_SPEED * 1.6
+PROVOKE_MAX_S = 12.0            # ...and how long he follows before giving up
+SHOVE_S = 2.4                   # how long the squaring up lasts once he is there
+SHOVE_HZ = 3.5                  # ...and how often a fist goes out
+BAFFLED_S = SHOVE_S + PROVOKE_MAX_S + 2.0   # the other man is never stuck
+FIGHT_BACK = 0.5                # how often being started on gets an answer
+FIGHT_BACK_STEP = 90.0          # how far off he walks when it does not
+
+# ------------------------------------------------------------------ the fun
+# None of it asked for and none of it load-bearing, which is the point.
+POUNCE_EVERY = (50.0, 130.0)    # how often one of them stalks the pointer
+STALK_R = 420.0                 # how far off the pointer catches his eye
+POUNCE_NEAR = 34.0              # close enough: down, wiggle, and go
+STALK_SPEED = WALK_SPEED * 0.55
+WIGGLE_S = 0.6                  # the wind-up before the leap
+RACE_EVERY = (140.0, 300.0)     # how often somebody suggests a race
+RACE_MIN = 3                    # fewer than this is just two men running
+RACE_SET_S = 2.4                # the three-two-one
+RACE_TRIP = 0.5                 # how often somebody goes over mid-race
+PILE_EVERY = (8.0, 15.0)        # how often the sleepy look for each other
+PILE_R = 46.0                   # how wide a heap of them is
+ICE_EVERY = (160.0, 340.0)      # how often the van finds this street
+SWEET_HASTE = 0.45              # happy notes bring it round sooner
+QUEUE_GAP = 34.0                # a place each in the queue
+SERVE_S = 1.2                   # one cone's worth of serving
+LICK_S = 6.0                    # how long a cone lasts
+PARTY_S = 20.0                  # how long the hats stay on
+HAT_H = 12.0
+HAT_C, POM_C = "#E8B33C", "#D6453C"
+CONE_C, SCOOP_C = "#D9A05B", "#F2B8CB"
+BDAY_WORDS = ("birthday", "bday")
+
+# ------------------------------------------------------- what he reads
+# The note colours the man who lives on it. Type anger onto a sheet and
+# whoever came off it walks about with a bold grin looking for a scrap; type
+# sadness and he wants nothing to do with one and runs when one starts. The
+# temper is one of the four moods the app already speaks, worked out from
+# the words, and it stays on him for as long as the words say so - a mood
+# wears off, a temper is re-read from the page.
+TEMPER_WORDS = {
+    "angry": ("angry", "anger", "mad", "furious", "fury", "rage", "raging",
+              "hate", "hatred", "annoyed", "annoying", "pissed", "livid",
+              "fuming", "grr", "argh"),
+    "sad": ("sad", "sadness", "unhappy", "depressed", "depressing", "down",
+            "miserable", "crying", "cried", "tears", "heartbroken", "lonely",
+            "gloomy", "grief", "sorrow", "sorry"),
+    "happy": ("happy", "happiness", "joy", "joyful", "yay", "excited",
+              "exciting", "great", "awesome", "wonderful", "love", "loved",
+              "lovely", "glad", "hooray", "woohoo"),
+    "sleepy": ("sleepy", "sleep", "tired", "exhausted", "drowsy", "yawn",
+               "zzz", "nap", "snooze", "knackered"),
+}
+SCARE_R = 260.0         # how close a scrap has to be before a sad man runs
+KEEN_HASTE = 0.25       # how much sooner trouble comes with an angry man idle
+DOZY_HASTE = 0.3        # ...and how much sooner a sleepy one nods off
+GRUMP_ODDS = 0.75       # how often an angry note wants no part of the fun
+GRUMP_S = 25.0          # how long a "no" stays a no
+PIZZA_WORDS = ("pizza", "hungry", "starving")
+PICNIC_S = 14.0         # how long the box lasts once it is open
+SEAT_GAP = 26.0         # a place each around the box
+BITE_HZ = 0.55          # how fast a slice goes up and down
+BOX_W, BOX_H = 22.0, 7.0
+BOX_C = "#D9B36C"       # cardboard
+CRUST_C = "#E8B33C"
+PEP_C = "#C24A42"
+# The bold grin: his own anger face, but pleased about it. Brows still down,
+# mouth turned all the way up.
+GRIN = FACES["cross"]._replace(curve=0.9, mouth=0.9, eye=0.85, open=0.0)
+
+
+def temper_of(text):
+    """What the words on a note do to whoever lives on it. None for nothing.
+
+    Whole words only - a man does not come off a note about things he has
+    made in a rage - and the feeling named most wins.
+    """
+    low = text.lower()
+    best, count = None, 0
+    for mood in MOODS:
+        hits = sum(len(re.findall(r"\b%s\b" % word, low))
+                   for word in TEMPER_WORDS[mood])
+        if hits > count:
+            best, count = mood, hits
+    return best
+
+
+def _has_bday(text):
+    low = text.lower()
+    return any(re.search(r"\b%s\b" % word, low) for word in BDAY_WORDS)
+
+
+def _has_pizza(text):
+    low = text.lower()
+    return any(re.search(r"\b%s\b" % word, low) for word in PIZZA_WORDS)
+
+
+def _order_pizza(guy, now):
+    """The note says pizza, and somebody has to go and get one.
+
+    The man whose note it is goes himself - it is his stomach - and the
+    sharing happens when he is back: see _serve_picnic. Busy men skip the
+    errand; the word already counted, so it is not retried every keystroke.
+    """
+    if guy.state not in ("rest", "walk", "chat", "watch") or guy.floor is None:
+        return
+    x1, x2 = guy._walls()
+    guy._leave_scene(now)
+    guy._watching = None
+    guy._site_x = _clamp(guy.x, x1 + 60.0, x2 - 60.0)
+    guy._begin("errand", now)
+
+
+def _serve_picnic(host, now):
+    """He is back with the box. Everybody peckish sits down to it.
+
+    Seats alternate either side of the box, nearest first, so a crowd rings
+    it rather than queueing off one end - and an angry note mostly stays
+    stood where he is, the same as with every other bit of fun.
+    """
+    eaters = [host]
+    for one in crew:
+        if (one is not host and one.floor is not None
+                and one.state in ("rest", "walk", "chat", "watch")
+                and abs(one.x - host.x) <= SONG_NEAR
+                and _game(one, now)):
+            eaters.append(one)
+    for i, one in enumerate(eaters):
+        one._leave_scene(now)
+        one._watching = None
+        one._begin("picnic", now)
+        one._queue_i = i
+        one._site_x = host._site_x
+        side = -1.0 if i % 2 else 1.0
+        one._lick_x = host._site_x + side * SEAT_GAP * (i // 2 + 1)
+    host.prop = "pizza_open"
+    host.feel("happy")
+
+
+def _party(guy, now):
+    """Somebody's note says birthday, and that is worth a fuss.
+
+    Hats for everybody near enough to count as at the party, the man himself
+    up celebrating, the rest brought over the way a finished list brings
+    them - and one of them starts a song, which the sing-along machinery
+    turns into the whole room clapping by itself.
+    """
+    for one in crew:
+        if one is guy or (abs(one.x - guy.x) <= APPLAUD_R
+                          and _game(one, now)):
+            one._hat_until = now + PARTY_S
+    others = [one for one in crew if one is not guy
+              and one.state in ("rest", "walk", "chat", "watch")
+              and _game(one, now)]
+    if others:
+        random.choice(others).perform("sing")
+    guy.feel("happy")
+    guy.perform("celebrate")
+    applaud(guy.x, guy.home_id)
+
+
+def _game(guy, now):
+    """Whether he can be talked into the fun. An angry note mostly cannot.
+
+    One roll per invitation, remembered: a man who has said no to a song is
+    not asked again every frame until he caves, he is left alone to scowl.
+    Everybody else always says yes - the roll is only for the angry.
+    """
+    if guy._grump_until > now:
+        return False
+    if guy.temper != "angry" or random.random() >= GRUMP_ODDS:
+        return True
+    guy._grump_until = now + GRUMP_S
+    guy._say("hmph")
+    guy.feel("angry")
+    return False
+
+
+def retune(note_id, text):
+    """The note has been retyped; whoever came off it reads the room.
+
+    Called from the note's _capture, which every change to the body funnels
+    through, so the temper always matches what the sheet currently says.
+    A birthday is the exception to "matches": it is a one-shot party when
+    the word arrives, not a state held for as long as it stays.
+    """
+    guy = for_note(note_id)
+    if guy is None:
+        return None
+    bday = _has_bday(text)
+    if bday and not guy._bday_done:
+        guy._bday_done = True
+        _party(guy, _time())
+    elif not bday:
+        guy._bday_done = False
+    pizza = _has_pizza(text)
+    if pizza and not guy._pizza_done:
+        guy._pizza_done = True
+        _order_pizza(guy, _time())
+    elif not pizza:
+        guy._pizza_done = False
+    guy.temper = temper_of(text)
+    if guy.temper is not None:
+        guy.feel(guy.temper)
+    return guy.temper
+
+
+# --------------------------------------------------------- calling it in
+# What happens after a scrap, and sometimes in the middle of one. A man who
+# is still sat down when the fighting is over gets noticed by whoever is
+# nearest: he comes over, phones for an ambulance and stands out of the way
+# while the pair of them carry his mate off. A scrap that is still going gets
+# called in the other way about one time in three, and then two men who were
+# swinging at each other suddenly have somewhere else to be.
+#
+# The vehicle itself is a prop and lives in the yard. Everything here is the
+# half of it that is people: who calls, who gets carried, who runs.
+ANGER_EVERY = (75.0, 180.0)     # how often one of them takes against another
+ANGER_NEAR = 220.0              # ...and how near the other has to be for it
+HELP_NEAR = 320.0               # how far off a man on the floor is noticed
+HELP_STAND = 78.0               # how close whoever phones it in stands
+HELP_WALK = WALK_SPEED * 1.7    # he does not amble over to an emergency
+HELP_MAX_S = 8.0                # ...and gives up walking over after this
+CALL_S = 2.4                    # how long he is on the phone
+POLICE_ODDS = 0.35              # how often a scrap gets called in
+CASUALTY_S = 14.0               # how long a man lies there waiting to be got
+FLEE_SPEED = RUN_SPEED * 1.3    # ...and how fast they go once it turns up
+FLEE_OFF = 150.0                # how far past the edge before they are gone
+VAN_PATIENCE = 20.0             # the whole pick-up, however it goes
 
 # ------------------------------------------------------------ a finished list
 # The last box on a note has just been ticked. Whoever is near enough to have
@@ -356,10 +656,24 @@ MOCK_COOLDOWN = 150.0
 crew = []
 scenes = []
 shy = False             # something full-screen is up and they are off the bar
+_anger_at = 0.0         # when one of them next takes against another
+_pounce_at = 0.0        # when the pointer next gets stalked
+_race_at = 0.0          # when somebody next suggests a race
+_ice_at = 0.0           # when the van next comes round
+_pile_at = 0.0          # when the sleepy next look for each other
+_scoop_at = 0.0         # when the next cone comes over the counter
+_racers = []            # everybody in the current race
+_race_order = []        # ...and the order they came home in
+_race_t0 = None         # when the gun goes
+_race_tripped = None    # whoever went over, owed a sit-down
+_song_at = 0.0          # ...and when one of them next starts singing
+_scrap_seen = None      # the scrap the law has already been offered
 _shy_at = 0.0
 _job = None
 _root = None
 STEP = None             # tests pin the step so the physics repeats exactly
+SPONTANEOUS = True      # ...and everything they start themselves: scraps,
+                        # ambulances, songs. Pinned off by the suite.
 _stamp = None
 _last = None            # the last frame the yard was stepped on
 
@@ -680,6 +994,10 @@ def tick():
     _last = now
     _watch_the_screen(now)
     _cast(now)
+    _trouble(now)
+    # The referee runs outside the spontaneous gate: a race somebody started
+    # by hand still finishes with the switch off.
+    _run_race(now)
     # Before they step, not after: a position fixed after the frame is drawn
     # is a frame of them overlapping, every frame.
     _space_out()
@@ -700,6 +1018,289 @@ def tick():
     yard.step(dt, min(now - (last or now), 3600.0))
     yard.paint()
     _arm(delay)
+
+
+def _due(name, every, now, scale=1.0):
+    """One recurring clock, by module-global name.
+
+    The first look only winds it - a crew four frames old has not had time
+    to want anything - and every firing winds the next.
+    """
+    at = globals()[name]
+    if at == 0.0 or now >= at:
+        globals()[name] = now + random.uniform(*every) * scale
+        return at != 0.0
+    return False
+
+
+def _fun(now):
+    """Everything that happens for no reason except that it is funny."""
+    if _due("_pounce_at", POUNCE_EVERY, now):
+        spot = _pointer()
+        if spot is not None and not any(g.state == "held" for g in crew):
+            px, py = spot
+            cats = [guy for guy in crew if guy.state in ("rest", "walk")
+                    and guy.floor is not None
+                    and abs(py - guy.floor) < 90.0
+                    and POUNCE_NEAR < abs(px - guy.x) < STALK_R]
+            if cats:
+                cat = min(cats, key=lambda guy: abs(guy.x - px))
+                cat._leave_scene(now)
+                cat._watching = None
+                cat._begin("stalk", now)
+    if _due("_race_at", RACE_EVERY, now):
+        race(now)
+    sweet = any(guy.temper == "happy" for guy in crew)
+    if _due("_ice_at", ICE_EVERY, now, SWEET_HASTE if sweet else 1.0):
+        idle = [guy for guy in crew
+                if guy.state in ("rest", "walk", "chat", "watch")
+                and guy.floor is not None]
+        if len(idle) >= 2 and yard.van() is None and not _racers:
+            mid = sum(guy.x for guy in idle) / len(idle)
+            yard.call_van("icecream", mid, idle[0]._floor_y())
+    if _due("_pile_at", PILE_EVERY, now):
+        # A conversation is no protection here either: a sleepy man mid-chat
+        # is a man about to fall asleep mid-chat.
+        dozy = [guy for guy in crew if guy.temper == "sleepy"
+                and guy.state in ("rest", "walk", "chat")
+                and guy.floor is not None]
+        if len(dozy) >= 2:
+            # The sleepy find each other and go down in a heap.
+            mid = sum(guy.x for guy in dozy) / len(dozy)
+            dozy.sort(key=lambda guy: guy.x)
+            for i, guy in enumerate(dozy):
+                spot = mid + (i - (len(dozy) - 1) / 2.0) * (PILE_R * 0.8)
+                if abs(guy.x - spot) <= 12.0:
+                    guy._leave_scene(now)
+                    guy._begin("sleep", now)
+                else:
+                    guy._leave_scene(now)
+                    guy._begin("walk", now)
+                    x1, x2 = guy.walk_line
+                    guy._goal = _clamp(spot, x1, x2)
+
+
+def _trouble(now):
+    """Scraps nobody asked for, and whatever turns up because of one.
+
+    Decided here for the whole crew rather than by each of them, for the same
+    reason the pairing is: two men who each phone for an ambulance have
+    called two ambulances, and the second one has nobody to pick up.
+    """
+    global _anger_at, _scrap_seen, _song_at
+    if not SPONTANEOUS:
+        return
+    _join_in(now)
+    _fun(now)
+    van = yard.van()
+    if van is not None:
+        _mind_the_van(van, now)
+        return
+    if any(guy.state == "help" for guy in crew):
+        return                      # somebody is already on the phone
+    hurt = [guy for guy in crew if guy.state == "beaten"]
+    if hurt and _send_for(hurt[0], "medic", hurt[0].x, now):
+        return
+    # A scrap gets called in once, when it starts, or not at all. Rolling
+    # every frame is a police car every scrap and a certainty dressed up as
+    # a chance.
+    fighting = [guy for guy in crew if guy.state == "fight"]
+    if len(fighting) >= 2:
+        # Anybody sad enough is not staying to watch it.
+        mid = sum(guy.x for guy in fighting) / len(fighting)
+        for guy in crew:
+            if (guy.temper == "sad" and guy.floor is not None
+                    and guy.state in ("rest", "walk", "watch", "chat")
+                    and abs(guy.x - mid) < SCARE_R):
+                guy._leave_scene(now)
+                guy._watching = None
+                guy._begin("run", now)
+                guy._run_way = 1.0 if guy.x >= mid else -1.0
+                guy._until = now + 3.0
+        mark = round(min(guy.since for guy in fighting), 3)
+        if mark != _scrap_seen:
+            _scrap_seen = mark
+            if random.random() < POLICE_ODDS:
+                mid = sum(guy.x for guy in fighting) / len(fighting)
+                _send_for(fighting[0], "police", mid, now)
+        return
+    # ...and every so often, one of them takes against another for no reason
+    # anybody could name. The first tick only sets the clock: a crew that has
+    # been up for four frames has not had time to fall out yet.
+    # A song, every so often, from whoever is stood about. The first tick
+    # only winds the clocks: a crew that has been up for four frames has had
+    # no time to fall out with anybody or to burst into song.
+    if _song_at == 0.0:
+        _song_at = now + random.uniform(*SONG_EVERY)
+    elif now >= _song_at:
+        _song_at = now + random.uniform(*SONG_EVERY)
+        idle = [guy for guy in crew if guy.state in ("rest", "walk")
+                and _game(guy, now)]
+        sunny = [guy for guy in idle if guy.temper == "happy"]
+        if idle:
+            random.choice(sunny or idle).perform("sing")
+            return
+    if _anger_at == 0.0:
+        _anger_at = now + random.uniform(*ANGER_EVERY)
+        return
+    if now < _anger_at:
+        return
+    # A conversation is no protection: half the point of it is that it comes
+    # out of nowhere, and being talked at is a reason as good as any.
+    idle = [guy for guy in crew
+            if guy.state in ("rest", "walk", "chat") and guy.floor is not None]
+    keen = [guy for guy in idle if guy.temper == "angry"]
+    # An angry note on the desk keeps the peace short.
+    _anger_at = now + random.uniform(*ANGER_EVERY) * (KEEN_HASTE if keen
+                                                      else 1.0)
+    if len(idle) < 2:
+        return
+    calm = [guy for guy in idle if guy.temper != "sad"]
+    if not calm:
+        return                  # a bar full of sad men starts nothing
+    bully = random.choice(keen or calm)
+    near = [guy for guy in idle
+            if guy is not bully and abs(guy.x - bully.x) <= ANGER_NEAR
+            and abs(guy.floor - bully.floor) <= 4.0]
+    if not near:
+        return
+    bully.feel("angry")
+    provoke(bully, min(near, key=lambda guy: abs(guy.x - bully.x)))
+
+
+def _join_in(now):
+    """Somebody is singing. Anybody near enough joins in, one way or another.
+
+    Checked every tick rather than settled when the song starts: a man who
+    wanders into earshot halfway through a song is a man who joins in
+    halfway through it, and one who is picked up out of it does not leave a
+    seat in the audience behind him.
+    """
+    singers = [guy for guy in crew if guy.state == "sing"]
+    if not singers:
+        return
+    stage = singers[0]
+    for guy in crew:
+        # A conversation is not a reason to miss it: they break off, which
+        # is what `_leave_scene` below is for.
+        if guy is stage or guy.state not in ("rest", "walk", "sleep",
+                                             "watch", "chat"):
+            continue
+        if guy.floor is None or stage.floor is None:
+            continue
+        if (abs(guy.floor - stage.floor) > 4.0
+                or abs(guy.x - stage.x) > SONG_NEAR):
+            continue
+        if not _game(guy, now):
+            continue
+        guy._leave_scene(now)
+        guy._watching = None
+        guy._begin("clap" if random.random() < CLAP_ODDS else "dance", now)
+        guy._song_x = stage.x
+        # They stop when he does, so it ends as one thing rather than three
+        # men winding down separately.
+        guy._until = stage._until
+
+
+def _send_for(hurt, kind, at_x, now):
+    """Whoever is nearest and free goes and phones it in. False if nobody is.
+
+    Nearest rather than everybody: a whole crew ringing for one ambulance is
+    a crowd, and the man who is actually hurt is behind it.
+    """
+    best = None
+    for guy in crew:
+        if guy is hurt or guy.state not in ("rest", "walk", "watch", "sleep"):
+            continue
+        if guy.floor is None or hurt.floor is None:
+            continue
+        if abs(guy.floor - hurt.floor) > 4.0 or abs(guy.x - at_x) > HELP_NEAR:
+            continue
+        if best is None or abs(guy.x - at_x) < abs(best.x - at_x):
+            best = guy
+    if best is None:
+        return False
+    best._leave_scene(now)
+    best._watching = None
+    best._begin("help", now)
+    best._help_kind = kind
+    best._help_at = at_x
+    x1, x2 = best._walls()
+    # He stands off to his own side of it rather than on top of it, so the
+    # stretcher has somewhere to be put down.
+    best._help_x = _clamp(at_x + HELP_STAND * (-1.0 if at_x > best.x else 1.0),
+                          x1, x2)
+    if kind == "medic":
+        # He is not getting up and walking it off while an ambulance is on
+        # its way to him.
+        hurt._until = now + CASUALTY_S
+    return True
+
+
+def _mind_the_van(van, now):
+    """The half of an emergency that is people rather than paint."""
+    if van.kind == "medic":
+        if van.phase == "load":
+            for guy in crew:
+                if (guy.state == "beaten"
+                        and abs(guy.x - van.at_x) <= HELP_STAND):
+                    guy._leave_scene(now)
+                    guy._begin("carted", now)
+        return
+    if van.kind == "icecream":
+        global _scoop_at
+        if van.phase != "serve":
+            return
+        line = [guy for guy in crew if guy.state == "queue"]
+        if not line:
+            if van.carry:
+                van.leave()             # everybody has had his
+                return
+            fresh = [guy for guy in crew
+                     if guy.state in ("rest", "walk", "chat", "watch")
+                     and guy.floor is not None
+                     and abs(guy.x - van.at_x) < HELP_NEAR
+                     and _game(guy, now)]
+            if not fresh:
+                van.leave()
+                return
+            # One queue, formed once - `carry` marks it, so the men walking
+            # off with cones are not recruited straight back onto the end.
+            van.carry = True
+            fresh.sort(key=lambda guy: abs(guy.x - van.door))
+            for i, guy in enumerate(fresh):
+                guy._leave_scene(now)
+                guy._watching = None
+                guy._begin("queue", now)
+                guy._queue_i = i
+            _scoop_at = now + SERVE_S
+            return
+        front = min(line, key=lambda guy: guy._queue_i)
+        spot = van.door + van.side * 16.0
+        if now >= _scoop_at and abs(front.x - spot) < 14.0:
+            _scoop_at = now + SERVE_S
+            front.prop = "cone"
+            front.feel("happy")
+            front._begin("lick", now)
+            for guy in line:
+                if guy is not front:
+                    guy._queue_i -= 1
+        return
+    # A police car, and two men with a reason to be somewhere else. They go
+    # opposite ways round it if they can, and it leaves after whichever of
+    # them it ended up behind.
+    running = [guy for guy in crew if guy.state in ("fight", "provoke")]
+    for guy in running:
+        guy._leave_scene(now)
+        guy._foe = None
+        guy._begin("run", now)
+        guy._run_leg = "off"
+        guy._run_way = 1.0 if guy.x >= van.x else -1.0
+        van.way = guy._run_way
+    for guy in crew:
+        if guy.state == "baffled":
+            guy._foe = None
+            guy._begin("rest", now)
 
 
 def _watch_the_screen(now):
@@ -962,6 +1563,187 @@ def focus(window, seconds=None):
     return guy
 
 
+def _pointer():
+    """Where the mouse is, asked through whoever is around to ask.
+
+    A seam as much as a helper: the suite puts its own answer in here, the
+    same way it does for the full-screen check.
+    """
+    for guy in crew:
+        try:
+            return guy.winfo_pointerxy()
+        except tk.TclError:
+            continue
+    return None
+
+
+def race(now=None):
+    """Line them up and race them: down the bar and back.
+
+    Whoever is stood about takes part, up to four of them. False if there
+    are not enough, or something bigger is already happening.
+    """
+    global _race_t0
+    now = _time() if now is None else now
+    if _racers or yard.van() is not None:
+        return False
+    fit = [guy for guy in crew if guy.state in ("rest", "walk", "chat")
+           and guy.floor is not None and _game(guy, now)]
+    if len(fit) < RACE_MIN:
+        return False
+    field = sorted(fit, key=lambda guy: guy.x)[:4]
+    x1, x2 = field[0]._walls()
+    for i, guy in enumerate(field):
+        guy._leave_scene(now)
+        guy._watching = None
+        guy._begin("race", now)
+        guy._race_mark = x1 + 70.0 + i * 40.0
+        guy._race_far = x2 - 60.0
+        guy._race_pace = random.uniform(0.92, 1.10)
+        guy._race_trip_at = None
+        _racers.append(guy)
+    _race_t0 = None
+    if random.random() < RACE_TRIP:
+        # Somebody is going over. Armed here, timed at the gun.
+        random.choice(field)._race_trip_at = -1.0
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
+def _run_race(now):
+    """The whole race, refereed once a frame rather than by each runner.
+
+    _do_race gets one man round the course; everything two of them have to
+    agree on - the gun, the result, who is owed an ambulance - is here.
+    """
+    global _race_t0, _race_tripped
+    if _race_tripped is not None:
+        if _race_tripped not in crew:
+            _race_tripped = None
+        elif _race_tripped.state == "rest":
+            # He came down at full tilt, and now that he has stopped
+            # bouncing it hurts. The ambulance takes it from there.
+            _race_tripped.perform("beaten")
+            _race_tripped = None
+    if not _racers:
+        return
+    racing = [guy for guy in _racers if guy in crew and guy.state == "race"]
+    if not racing:
+        if _race_tripped is None:
+            del _racers[:]
+            del _race_order[:]
+            _race_t0 = None
+        return
+    if _race_t0 is None:
+        if all(guy._race_leg != "line" for guy in racing):
+            _race_t0 = now + RACE_SET_S
+        return
+    if now >= _race_t0:
+        for guy in racing:
+            if guy._race_leg == "set":
+                guy._race_leg = "out"
+                guy._mark = None
+                if guy._race_trip_at == -1.0:
+                    guy._race_trip_at = now + random.uniform(0.6, 2.2)
+    done = [guy for guy in racing if guy._race_leg == "done"]
+    if done and len(done) == len(racing):
+        first = next(guy for guy in _race_order if guy in racing)
+        for guy in racing:
+            if guy is first:
+                guy.feel("happy")
+                guy.perform("celebrate")
+            else:
+                guy._begin("clap", now)
+                guy._song_x = first.x
+                guy._until = now + 2.5
+        del _racers[:]
+        del _race_order[:]
+        _race_t0 = None
+
+
+def act(guy, what, seconds=None):
+    """Ask one of them to do something, by name. False if he cannot.
+
+    The way in for everything outside this file: a scene, a menu, or a check
+    says act(guy, "sing") and does not have to know that singing is a state
+    and celebrating is a different one that already existed.
+    """
+    if guy is None or guy not in crew:
+        return False
+    return guy.perform(what, seconds)
+
+
+def scrap(one, other, seconds=None):
+    """Two of them fall out. One ends up celebrating and one sat down.
+
+    Set up here rather than by each of them, for the same reason pairing is:
+    two men who each pick a fight with the other are two fights.
+    """
+    if one is other or one not in crew or other not in crew:
+        return False
+    now = _time()
+    for guy, foe in ((one, other), (other, one)):
+        guy._leave_scene(now)
+        guy._foe = foe
+        guy.feel("angry")
+        guy._begin("fight", now)
+        if seconds is not None:
+            guy._until = now + float(seconds)
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
+def chase(one, other, seconds=None):
+    """One of them runs after the other, up and down the bar.
+
+    Paired here rather than by each of them, the same way a scrap is: a chase
+    is one man running and one man after him, and two men who each decide
+    they are the one being chased is nobody chasing anybody.
+    """
+    if one is other or one not in crew or other not in crew:
+        return False
+    now = _time()
+    for guy, foe, leg in ((one, other, "after"), (other, one, "away")):
+        guy._leave_scene(now)
+        guy._begin("run", now)          # clears the foe, so it is set after
+        guy._foe = foe
+        guy._run_leg = leg
+        if seconds is not None:
+            guy._until = now + float(seconds)
+    # Both of them the same way, away from the one doing the chasing, so it
+    # starts as a chase rather than as the two of them running at each other.
+    one._run_way = other._run_way = 1.0 if other.x >= one.x else -1.0
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
+def provoke(bully, other, seconds=None):
+    """One of them starts on another who never asked for it.
+
+    Paired here for the same reason a scrap is: it takes two, and the two of
+    them have to agree about which is which. The one started on stands there
+    baffled while it goes on, and when it is over he either walks off or has
+    had enough - `_do_provoke` decides that, once, at the end of it.
+    """
+    if bully is other or bully not in crew or other not in crew:
+        return False
+    now = _time()
+    for guy in (bully, other):
+        guy._leave_scene(now)
+    bully._begin("provoke", now)        # clears the foe, so it is set after
+    other._begin("baffled", now)
+    bully._foe, other._foe = other, bully
+    if seconds is not None:
+        bully._shove_s = float(seconds)
+        bully._until = now + float(seconds)
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
 def applaud(x, note_id=None):
     """Somebody finished a list. Anybody near it comes over for it.
 
@@ -1160,8 +1942,46 @@ class Roamer(tk.Toplevel):
         self._focus_s = FOCUS_S
         self._cheer_x = self.x          # the note that has just been finished
         self._shy_home = self.x         # where he was when something went
+        self._shove_s = SHOVE_S         # how long he squares up for
+        self._help_kind = "medic"       # what he is phoning for
+        self._help_at = self.x          # what he is phoning about
+        self._help_x = self.x           # ...and where he stands to do it
+        self._help_leg = "over"         # walking over, or on the phone
+        self._stalk_leg = "creep"       # stalking the pointer, or wound up
+        self._prey = (0.0, 0.0)         # where it was when he committed
+        self._race_leg = "line"         # his lane of the race
+        self._race_mark = self.x        # where his lane starts
+        self._race_far = self.x         # ...and where it turns
+        self._race_pace = 1.0           # nobody runs quite the same speed
+        self._race_trip_at = None       # when his race ends early, if it does
+        self._queue_i = 0               # his place in the ice cream queue
+        self._lick_x = self.x           # where he ambles off to with it
+        self._hat_until = 0.0           # a party hat, while there is a party
+        self._bday_done = False         # this note's birthday has been had
+        self._pizza_done = False        # this note's pizza run has been made
+        self._grump_until = 0.0         # while set, he is not joining anything
+        self._song_x = self.x           # who he is clapping at
+        self._song_home = self.x        # ...and the spot he dances about
         self._shy_leg = "out"           # full-screen, and which leg he is on
         self._shy_way = -1.0
+        self.mood = None                # happy, sad, angry, sleepy, or nothing
+        self.temper = None              # ...and the one the note itself sets
+        try:
+            words = "%s %s" % (note_window.note.get("heading", ""),
+                               note_window.note.get("body", ""))
+            self.temper = temper_of(words)
+            # A birthday already on the note is not a party every time he is
+            # dragged off it; only the word arriving fresh is. Pizza the same.
+            self._bday_done = _has_bday(words)
+            self._pizza_done = _has_pizza(words)
+        except (AttributeError, tk.TclError):
+            pass
+        self._mood_until = 0.0
+        self.prop = None                # something in his hands: "phone"
+        self._foe = None                # who he is scrapping or running with
+        self._run_way = 1.0             # which way he is running
+        self._run_leg = "solo"          # on his own, "after" him, or "away"
+        self._phone_leg = "type"        # typing on it, or talking into it
         self._shy_sat = False           # he was sitting with a note when it
                                         # went full-screen
 
@@ -1412,6 +2232,72 @@ class Roamer(tk.Toplevel):
                 middle = self.x
             x1, x2 = self.walk_line
             self._vigil_x = _clamp(middle, x1 + FIRE_SEAT, x2 - FIRE_SEAT)
+        elif state == "sing":
+            self._until = now + ACTS["sing"]
+            self.hands = self.feet = None
+        elif state in ("clap", "dance"):
+            # However long is left of the song. Whoever starts them off says
+            # so; on their own they are worth about one chorus.
+            self._until = now + ACTS["sing"]
+            self._song_home = self.x
+            self.hands = self.feet = None
+        elif state == "phone":
+            self._until = now + ACTS["phone"]
+            self.prop = "phone"
+            self.hands = self.feet = None
+        elif state == "beaten":
+            self._until = now + ACTS["beaten"]
+            self.hands = self.feet = None
+        elif state == "fight":
+            self._until = now + ACTS["fight"]
+            self.hands = self.feet = None
+        elif state == "provoke":
+            # Timed from arriving rather than from setting off: the squaring
+            # up is the point, and a man who spent all of it walking over has
+            # not started on anybody.
+            self._shove_s = SHOVE_S
+            self._until = now + SHOVE_S
+            self._foe = None
+            self.hands = self.feet = None
+        elif state == "baffled":
+            self._until = now + BAFFLED_S
+            self._foe = None
+            self.hands = self.feet = None
+        elif state == "help":
+            self._until = now + HELP_MAX_S
+            self._help_leg = "over"
+            self.hands = self.feet = None
+        elif state == "stalk":
+            self._until = now + 14.0
+            self._stalk_leg = "creep"
+            self.hands = self.feet = None
+        elif state == "errand":
+            self._until = now + FETCH_MAX_S
+            x1, x2 = self._walls()
+            self._fetch = "out"
+            # Out the nearest side: the pizza place is wherever is closest.
+            self._fetch_way = 1.0 if (x2 - self.x) < (self.x - x1) else -1.0
+            self.prop = None
+            self.hands = self.feet = None
+        elif state == "picnic":
+            self._until = now + PICNIC_S
+            self.hands = self.feet = None
+        elif state == "race":
+            self._until = now + 60.0
+            self._race_leg = "line"
+            self.hands = self.feet = None
+        elif state == "queue":
+            self._until = now + 30.0
+            self.hands = self.feet = None
+        elif state == "lick":
+            self._until = now + LICK_S
+            self._lick_x = self.x + random.choice((-1.0, 1.0)) * 90.0
+            self.hands = self.feet = None
+        elif state == "carted":
+            # However long the van takes. Nothing here ends it - the van
+            # does, by driving off with him.
+            self._until = now + VAN_PATIENCE
+            self.hands = self.feet = None
         elif state == "cheer":
             self._until = now + CHEER_S
             self.hands = self.feet = None
@@ -1427,6 +2313,12 @@ class Roamer(tk.Toplevel):
             self._shy_way = -1.0 if (self.x - x1) < (x2 - self.x) else 1.0
             self.hands = self.feet = None
             self._mark = None
+        elif state == "run":
+            self._until = now + ACTS["run"]
+            self._run_leg = "solo"
+            self._foe = None
+            self._run_way = random.choice((-1.0, 1.0))
+            self.hands = self.feet = None
         elif state == "panic":
             self._until = now + PANIC_S
             self._panic_until = now + PANIC_S + PANIC_FACE_S
@@ -1590,7 +2482,8 @@ class Roamer(tk.Toplevel):
         self.roll += self.spin * dt
         self.hands = self.feet = None
         self.facing = _clamp(self.vx / 200.0, -1.0, 1.0)
-        self.lean, self.squash = 0.0, 1.0
+        self.lean = 0.0
+        self.squash = _clamp(1.0 + self.vy / 2600.0, 0.92, 1.16)
         self.crouch = 0.35
         # He braces just before he arrives, which is most of what makes a drop
         # look like a body rather than a prop.
@@ -1646,6 +2539,7 @@ class Roamer(tk.Toplevel):
 
     def _do_rest(self, now, _dt):
         self.squash, self.crouch, self.roll, self.lean = 1.0, 0.0, 0.0, 0.0
+        self._breathe(now)
         self.phase = 0.0
         self.face = FACES["calm"]
         self.facing = _mix(self.facing, 0.0, 0.25)
@@ -1663,7 +2557,9 @@ class Roamer(tk.Toplevel):
             self.hands = self.feet = None
             self._act_at = now + random.uniform(*IDLE_EVERY)
         if now >= self._until:
-            if now - self._stir_at > SLEEP_AFTER:
+            dozes = (SLEEP_AFTER * DOZY_HASTE
+                     if self.temper == "sleepy" else SLEEP_AFTER)
+            if now - self._stir_at > dozes:
                 self._begin("sleep", now)
             else:
                 self._begin("walk", now)
@@ -1709,6 +2605,17 @@ class Roamer(tk.Toplevel):
     def _do_sleep(self, now, _dt):
         self.face = FACES["calm"]
         self.facing, self.look, self.phase = 0.0, (0.0, 0.0), 0.0
+        # In a heap, heads go together: he tips towards the nearest one
+        # asleep beside him, and stays upright sleeping alone.
+        near = [guy for guy in crew if guy is not self
+                and guy.state == "sleep" and abs(guy.x - self.x) < PILE_R]
+        if near:
+            other = min(near, key=lambda guy: abs(guy.x - self.x))
+            self.roll = 0.12 if other.x > self.x else -0.12
+        else:
+            self.roll = 0.0
+        self._breathe(now, 0.035, 0.14)     # slower, deeper, properly asleep
+        self._say("z" if int(now * 0.8) % 2 else "Z")
         self.y = self._floor_y()
         # The pointer coming over is what wakes him. Without it dozing is a
         # state he never leaves except by being picked up, and a mascot who has
@@ -1722,6 +2629,7 @@ class Roamer(tk.Toplevel):
             self._begin("rest", now)
 
     def _do_walk(self, now, dt):
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
         way = 1.0 if self._goal > self.x else -1.0
         self.x += way * WALK_SPEED * dt
         self.phase += WALK_SPEED * dt / STEP_PX * math.pi
@@ -1942,6 +2850,7 @@ class Roamer(tk.Toplevel):
             self.feet = ((self.x + inwards * 9.0, floor),
                          (self.x + inwards * 18.0, floor))
             self.hands = None
+            self._breathe(now, 0.024, 0.20)
             self.facing = _clamp(inwards * 0.72, -1.0, 1.0)
             self.lean, self.phase = 0.0, 0.0
             if blaze is None:
@@ -1976,6 +2885,291 @@ class Roamer(tk.Toplevel):
             return
         self.look = _aim((self.x, self._face_y()), (px, py))
 
+    def _do_sing(self, now, dt):
+        """Head back, one hand out, and something over his head.
+
+        The note over him is the same speech mark everything else uses: a
+        second way of drawing something above a mascot would be a second thing
+        to keep in the right place while he walks.
+        """
+        u = (now - self.since)
+        self.squash, self.crouch = 1.0 + 0.05 * math.sin(u * 5.0), 0.0
+        self.roll = math.sin(u * 2.2) * 0.06
+        self.lean, self.phase = 0.0, 0.0
+        self.feet = None
+        self.y = self._floor_y() - abs(math.sin(u * 3.4)) * 3.0
+        fy = self._face_y()
+        self.hands = ((self.x - 26.0, fy - 6.0 - math.sin(u * 3.4) * 8.0), None)
+        self.facing = _mix(self.facing, 0.25, 0.08)
+        self.look = (0.0, -1.6)
+        self.face = _face_mix(FACES["happy"], FACES["talk"],
+                              0.35 + 0.35 * abs(math.sin(u * 3.0)))._replace(
+            open=0.35 + 0.5 * abs(math.sin(u * 3.0)))
+        self._say(SING_LINES[int(u * 1.6) % len(SING_LINES)])
+        if now >= self._until:
+            self._begin("rest", now)
+
+    def _do_clap(self, now, dt):
+        """On the beat, and looking at whoever is making the noise.
+
+        The hands are the whole thing: they come together on the beat and
+        open again between, and the rest of him bobs with it. A man clapping
+        with his arms at his sides is a man standing still.
+        """
+        u = now - self.since
+        beat = math.cos(u * CLAP_HZ * TAU)
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.phase, self.lean = 0.0, 0.0
+        self.y = self._floor_y() - max(0.0, beat) * 2.0
+        self.roll = 0.05 * beat
+        fy = self._face_y()
+        apart = 3.0 + (1.0 - beat) / 2.0 * CLAP_REACH
+        self.hands = ((self.x - apart, fy + 9.0), (self.x + apart, fy + 9.0))
+        self.feet = None
+        self.facing = _mix(self.facing,
+                           0.5 if self._song_x > self.x else -0.5, 0.12)
+        self.look = _aim((self.x, fy), (self._song_x, fy - 6.0))
+        self.face = FACES["happy"]
+        if now >= self._until:
+            self._social_at = now
+            self._begin("rest", now)
+
+    def _do_dance(self, now, dt):
+        """Side to side about the spot he was standing on, arms up.
+
+        Round his own spot rather than off along the bar: six men dancing
+        across the taskbar end up in a heap at one end of it, and the man
+        singing gets danced straight through.
+        """
+        u = now - self.since
+        sway = math.sin(u * DANCE_HZ * TAU)
+        hop = abs(math.sin(u * DANCE_HZ * TAU))
+        x1, x2 = self._walls()
+        self.x = _clamp(self._song_home + sway * DANCE_STEP, x1, x2)
+        self.y = self._floor_y() - hop * DANCE_HOP
+        self.squash = 0.95 + 0.10 * hop
+        self.crouch = 0.0
+        self.roll = sway * 0.12
+        self.lean = sway * 2.0
+        self.phase = 0.0
+        fy = self._face_y()
+        # Whichever arm is on the outside of the sway goes up; the other one
+        # stays in. Both up at once is a celebration, and he is not cheering.
+        high = fy - 16.0 - max(0.0, sway) * 10.0
+        low = fy - 16.0 - max(0.0, -sway) * 10.0
+        self.hands = ((self.x - 20.0, low), (self.x + 20.0, high))
+        self.feet = None
+        self.facing = _mix(self.facing, sway * 0.45, 0.2)
+        self.look = _aim((self.x, fy), (self._song_x, fy - 6.0))
+        self.face = FACES["laugh"]
+        if now >= self._until:
+            self._social_at = now
+            self._begin("rest", now)
+
+    def _do_phone(self, now, dt):
+        """Two ways of holding it: thumbing at it, or talking into it.
+
+        The phone itself is drawn by paint() off `prop`, the same way the
+        plank is drawn off `carry` - the pose puts a hand somewhere and the
+        drawing puts the thing in it.
+        """
+        u = now - self.since
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.lean, self.phase = 0.0, 0.0
+        self.feet = None
+        self.y = self._floor_y()
+        fy = self._face_y()
+        if self._phone_leg == "talk":
+            # At his ear, the other hand going while he talks.
+            self.facing = _mix(self.facing, 0.55, 0.1)
+            self.hands = ((self.x - 13.0, fy - 2.0),
+                          (self.x + 20.0 + math.sin(u * 4.0) * 5.0,
+                           fy + 10.0 + math.cos(u * 3.0) * 4.0))
+            self.look = (1.2, -0.4)
+            self.roll = 0.03 * math.sin(u * 3.0)
+            self.face = FACES["talk"]._replace(
+                open=0.2 + 0.5 * abs(math.sin(now * 4.0 * TAU)))
+        else:
+            # Both hands down in front of him, thumbs going, head bent to it.
+            self.facing = _mix(self.facing, 0.0, 0.15)
+            self.hands = ((self.x - 9.0, fy + 17.0 + math.sin(u * 9.0) * 1.5),
+                          (self.x + 9.0, fy + 17.0 + math.cos(u * 9.0) * 1.5))
+            self.look = (0.0, 2.6)
+            self.roll = 0.02 * math.sin(u * 4.5)
+            self.face = _face_mix(FACES["calm"], FACES["think"], 0.5)
+            self.y = self._floor_y() + 1.0
+        if now >= self._until:
+            self.prop = None
+            self._begin("rest", now)
+
+    def _do_beaten(self, now, dt):
+        """Sat down where he lost it: knees up, head down, and not over it."""
+        u = _smooth(_clamp((now - self.since) / 0.5, 0.0, 1.0))
+        floor = self._floor_y()
+        self.roll = 0.0
+        # A sigh, not a breath: all exhale, on a slow beat.
+        self.squash = 1.0 - 0.025 * abs(math.sin((now - self.since) * 0.35 * TAU))
+        self.lean, self.phase = 0.0, 0.0
+        self.crouch = u
+        self.y = floor + SIT_DROP * u
+        self.feet = ((self.x - 9.0, floor), (self.x + 9.0, floor))
+        fy = self._face_y()
+        self.hands = ((self.x - 15.0, fy + 20.0), (self.x + 15.0, fy + 20.0))
+        self.facing = _mix(self.facing, 0.0, 0.1)
+        self.look = (0.0, 2.2)
+        self.face = FACES["sad"]
+        if now >= self._until:
+            self.feel("sad")
+            self._begin("rest", now)
+
+    def _do_fight(self, now, dt):
+        """A scrap: two of them squaring up, all elbows and no damage.
+
+        Cartoon rules - they swing at each other, neither of them ever
+        connects, and it ends with one of them celebrating and the other sat
+        down. Who wins is decided when it ends rather than when it starts, so
+        a hand closing on one of them mid-scrap simply ends it.
+        """
+        foe = self._foe
+        u = now - self.since
+        floor = self._floor_y()
+        self.squash, self.crouch = 1.0, 0.0
+        self.phase = 0.0
+        self.feet = None
+        way = 1.0 if (foe is not None and foe.x > self.x) else -1.0
+        self.facing = _clamp(way * 0.8, -1.0, 1.0)
+        self.lean = way * 4.0
+        self.roll = math.sin(u * SWING_HZ * TAU) * 0.09
+        self.x += math.sin(u * SWING_HZ * TAU * 0.5) * DUST_R * dt * 4.0
+        self.y = floor - abs(math.sin(u * SWING_HZ * TAU * 0.5)) * 2.0
+        fy = self._face_y()
+        swing = math.sin(u * SWING_HZ * TAU)
+        self.hands = ((self.x + way * (14.0 + swing * 16.0), fy + 2.0),
+                      (self.x - way * 8.0, fy + 12.0))
+        self.look = _aim((self.x, fy), (foe.x, foe._face_y())) if foe else (0.0, 0.0)
+        self.face = FACES["cross"]
+        if now < self._until:
+            return
+        # Somebody has to lose. Both of them are told here, once, so they do
+        # not each decide it and both win.
+        if foe is not None and foe.state == "fight" and foe._foe is self:
+            winner, loser = ((self, foe) if random.random() < 0.5 else (foe, self))
+            winner._foe = loser._foe = None
+            winner.feel("happy")
+            winner.perform("celebrate")
+            loser.perform("beaten")
+        else:
+            self._foe = None
+            self._begin("rest", now)
+
+    def _do_provoke(self, now, dt):
+        """Over to him, and then all elbows at nothing in particular.
+
+        The walk is not counted against the squaring up - `_until` is pushed
+        along until he arrives - so somebody started on from the other end of
+        the bar still gets started on rather than watching a man walk towards
+        him and give up. He gives up eventually all the same: a foe who keeps
+        walking away is not worth the whole afternoon.
+        """
+        foe = self._foe if self._foe in crew else None
+        if foe is None or foe.state not in ("baffled", "provoke"):
+            self._foe = None
+            self._begin("rest", now)
+            return
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.y = self._floor_y()
+        fy = self._face_y()
+        gap = foe.x - self.x
+        way = 1.0 if gap > 0 else -1.0
+        self.look = _aim((self.x, fy), (foe.x, foe._face_y()))
+        if abs(gap) > PROVOKE_NEAR:
+            if now - self.since >= PROVOKE_MAX_S:
+                # Following somebody who keeps walking off is not worth the
+                # whole afternoon, and neither of them is left mid-scene.
+                foe._foe = None
+                foe._begin("rest", now)
+                self._foe = None
+                self._begin("rest", now)
+                return
+            x1, x2 = self._walls()
+            self.x = _clamp(self.x + way * PROVOKE_SPEED * dt, x1, x2)
+            self.phase += PROVOKE_SPEED * dt / STEP_PX * math.pi
+            self.facing, self.lean = way * 0.62, way * 3.0
+            self.face = FACES["smug"]
+            self.hands = self.feet = None
+            self._until = now + self._shove_s
+            return
+        # Squared up: one fist out at his face and back, and nothing lands.
+        u = now - self.since
+        swing = math.sin(u * SHOVE_HZ * TAU)
+        self.phase = 0.0
+        self.facing = _clamp(way * 0.8, -1.0, 1.0)
+        self.lean = way * 4.5
+        self.face = FACES["cross"]
+        self.hands = ((self.x + way * (12.0 + max(swing, 0.0) * 20.0), fy),
+                      (self.x - way * 10.0, fy + 12.0))
+        self.y = self._floor_y() - max(0.0, swing) * 1.8
+        self.feet = None
+        self._say("!" if swing > 0.0 else None)
+        if now < self._until:
+            return
+        # He has made whatever point he had. What comes of it is the other
+        # man's to decide, and it is decided here, once, so the two of them
+        # do not each decide it and disagree.
+        # What comes back depends on who he started on. An angry note
+        # always answers; a sad one never does.
+        odds = {"angry": 1.0, "sad": 0.0}.get(foe.temper, FIGHT_BACK)
+        if random.random() < odds:
+            scrap(self, foe)
+            return
+        foe.shrug_off(now)
+        self._foe = None
+        self.feel("happy")
+        self._begin("rest", now)
+
+    def _do_baffled(self, now, dt):
+        """Somebody has started on him and he has no idea why.
+
+        Hands out and a face on him, and that is all: what happens next is
+        not his to start. The clock is only here so that a man whose bully
+        was picked up mid-shove is not stood like that for the afternoon.
+        """
+        foe = self._foe if self._foe in crew else None
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.phase = 0.0
+        self.y = self._floor_y()
+        fy = self._face_y()
+        way = 1.0 if (foe is not None and foe.x > self.x) else -1.0
+        self.facing = _clamp(way * 0.7, -1.0, 1.0)
+        self.lean = -way * 2.6         # leaning off him, not into him
+        # The head goes over the way the body leans: the tilt IS confusion,
+        # and the waver keeps it a thing he is doing rather than a pose.
+        self.roll = -way * (0.12 + 0.02 * math.sin((now - self.since)
+                                                   * 1.1 * TAU))
+        self.face = FACES["wtf"]
+        self.look = (_aim((self.x, fy), (foe.x, foe._face_y()))
+                     if foe is not None else (0.0, 0.0))
+        # Palms out and low: the shape of a man asking what this is about.
+        self.hands = ((self.x - 20.0, fy + 16.0), (self.x + 20.0, fy + 16.0))
+        self.feet = None
+        self._say("?")
+        if foe is None or now >= self._until:
+            self._foe = None
+            self._begin("rest", now)
+
+    def shrug_off(self, now):
+        """Started on, and not interested. He goes and stands somewhere else.
+
+        The mood is what carries it: a man who walks away from this with his
+        ordinary face on reads as a man who did not notice, and he did.
+        """
+        self._foe = None
+        self.feel("sad")
+        self._begin("walk", now)
+        x1, x2 = self.walk_line
+        away = FIGHT_BACK_STEP * (-1.0 if self.facing > 0.0 else 1.0)
+        self._goal = _clamp(self.x + away, x1, x2)
+
     def _do_cheer(self, now, dt):
         """Over to the note, and a fuss about it.
 
@@ -2002,6 +3196,7 @@ class Roamer(tk.Toplevel):
             self.phase, self.lean = 0.0, 0.0
             self.facing = _mix(self.facing, 0.0, 0.2)
             self.y = self._floor_y() - beat * 6.0
+            self.squash = 0.95 + beat * 0.12
             self.hands = ((self.x - 24.0, fy - 14.0 - beat * 8.0),
                           (self.x + 24.0, fy - 14.0 - beat * 8.0))
             self.feet = None
@@ -2066,6 +3261,395 @@ class Roamer(tk.Toplevel):
         self._shy_sat = False
         self._shy_leg = "back"
         self.since = now
+
+    def _do_run(self, now, dt):
+        """Running - on his own, after somebody, or away from somebody.
+
+        One state for the three, because they are the same legs and differ
+        only in who chooses the way. The man in front turns at the walls and
+        runs straight back past the man after him, which is what a chase
+        looks like; the man behind brakes rather than walking through him.
+        """
+        x1, x2 = self._walls()
+        foe = self._foe if self._foe in crew else None
+        step = RUN_SPEED * dt
+        if self._run_leg == "off":
+            # Not running about: running off. The walls are not walls any
+            # more, and what is behind him has a blue light on it.
+            self.x += self._run_way * FLEE_SPEED * dt
+            self._run_pose(way=self._run_way, dt=dt)
+            if not (x1 - FLEE_OFF <= self.x <= x2 + FLEE_OFF):
+                self.go_home()
+            return
+        if foe is not None and self._run_leg == "after":
+            self._run_way = 1.0 if foe.x > self.x else -1.0
+            step = min(step, max(0.0, abs(foe.x - self.x) - CHASE_GAP))
+        way = self._run_way
+        self.x += way * step
+        if self.x <= x1 or self.x >= x2:
+            self.x = _clamp(self.x, x1, x2)
+            self._run_way = -way
+        self._run_pose(way, dt)
+        if now >= self._until:
+            self._foe = None
+            self._stir_at = now
+            self._begin("rest", now)
+
+    def _do_stalk(self, now, dt):
+        """The pointer, stalked: the creep, the wiggle, and the pounce.
+
+        He always misses - the pounce is a throw into the ordinary fall, and
+        by the time he lands the pointer has moved or it never mattered. The
+        landing's dazed-to-calm recovery reads as him deciding he meant to
+        do that, which is the whole joke.
+        """
+        self.y = self._floor_y()
+        self.feet = None
+        if self._stalk_leg == "creep":
+            spot = _pointer()
+            if (spot is None or abs(spot[0] - self.x) > STALK_R
+                    or now >= self._until):
+                # It has wandered off, or he has been at this too long.
+                # Straighten up and pretend nothing.
+                self._stir_at = now
+                self._begin("rest", now)
+                return
+            px, py = spot
+            way = 1.0 if px > self.x else -1.0
+            if abs(px - self.x) > POUNCE_NEAR + 26.0:
+                x1, x2 = self._walls()
+                self.x = _clamp(self.x + way * STALK_SPEED * dt, x1, x2)
+                self.phase += STALK_SPEED * dt / STEP_PX * math.pi
+                self.squash, self.roll = 1.0, 0.0
+                self.crouch = 0.5
+                self.facing, self.lean = way * 0.7, way * 1.6
+                self.look = _aim((self.x, self._face_y()), (px, py))
+                self.face = FACES["smug"]
+                self.hands = None
+                return
+            self._stalk_leg = "wiggle"
+            self._prey = (float(px), float(py))
+            self.since = now
+            return
+        # Wound up: down on his haunches, everything wagging.
+        u = now - self.since
+        px, py = self._prey
+        way = 1.0 if px > self.x else -1.0
+        self.phase, self.lean = 0.0, 0.0
+        self.crouch = 0.68
+        self.squash = 1.0 - 0.04 * math.sin(u * 16.0)
+        self.roll = math.sin(u * 18.0) * 0.06
+        self.facing = _clamp(way * 0.8, -1.0, 1.0)
+        self.look = _aim((self.x, self._face_y()), (px, py))
+        self.face = FACES["smug"]
+        self.hands = None
+        if u < WIGGLE_S:
+            return
+        self.vx = _clamp((px - self.x) * 2.6, -260.0, 260.0)
+        self.vy = -330.0
+        self.spin = 0.0
+        self.feel("happy")
+        self._begin("fall", now)
+
+    def _do_race(self, now, dt):
+        """His lane of it. The gun and the result belong to _run_race."""
+        global _race_tripped
+        x1, x2 = self._walls()
+        self.y = self._floor_y()
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.hands = self.feet = None
+        if now >= self._until:
+            self._begin("rest", now)
+            return
+        leg = self._race_leg
+        if leg == "line":
+            gap = self._race_mark - self.x
+            if abs(gap) > 4.0:
+                way = 1.0 if gap > 0 else -1.0
+                self.x = _clamp(self.x + way * WALK_SPEED * 1.5 * dt, x1, x2)
+                self.phase += WALK_SPEED * 1.5 * dt / STEP_PX * math.pi
+                self.facing, self.lean = way * 0.62, way * 2.6
+                self.face = FACES["happy"]
+                return
+            self.x = self._race_mark
+            self._race_leg = "set"
+            return
+        if leg == "set":
+            way = 1.0 if self._race_far > self.x else -1.0
+            self.phase = 0.0
+            self.crouch = 0.55
+            self.facing, self.lean = way * 0.8, way * 3.0
+            self.look = (way * 2.0, 0.5)
+            self.face = FACES["strain"]
+            if _race_t0 is not None:
+                left = _race_t0 - now
+                self._say(str(min(3, int(left / (RACE_SET_S / 3.0)) + 1))
+                          if left > 0 else "GO")
+            return
+        if leg in ("out", "home"):
+            goal = self._race_far if leg == "out" else self._race_mark
+            way = 1.0 if goal > self.x else -1.0
+            if (self._race_trip_at is not None
+                    and 0.0 < self._race_trip_at <= now):
+                # Over he goes, at full tilt.
+                _race_tripped = self
+                self.vx, self.vy = way * 240.0, -170.0
+                self.spin = way * 5.0
+                self._begin("fall", now)
+                return
+            self.x = _clamp(self.x + way * RUN_SPEED * self._race_pace * dt,
+                            x1, x2)
+            self._run_leg = "solo"      # the effort face
+            self._run_pose(way, dt)
+            if abs(self.x - goal) < 6.0:
+                if leg == "out":
+                    self._race_leg = "home"
+                else:
+                    self._race_leg = "done"
+                    _race_order.append(self)
+            return
+        # done: stood at the line, getting his breath back, awaiting the
+        # judges.
+        self.phase = 0.0
+        self._breathe(now, 0.03, 0.6)
+        self.face = FACES["happy"]
+
+    def _do_queue(self, now, dt):
+        """His place in the ice cream queue, walked to and then kept."""
+        van = yard.van()
+        if (van is None or van.kind != "icecream" or van.phase != "serve"
+                or now >= self._until):
+            self._begin("rest", now)
+            return
+        x1, x2 = self._walls()
+        self.y = self._floor_y()
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        spot = _clamp(van.door + van.side * (16.0 + self._queue_i * QUEUE_GAP),
+                      x1, x2)
+        gap = spot - self.x
+        way = 1.0 if van.x > self.x else -1.0
+        if abs(gap) > 4.0:
+            step_way = 1.0 if gap > 0 else -1.0
+            self.x = _clamp(self.x + step_way * WALK_SPEED * 1.3 * dt, x1, x2)
+            self.phase += WALK_SPEED * 1.3 * dt / STEP_PX * math.pi
+            self.facing, self.lean = step_way * 0.62, step_way * 2.4
+            self.face = FACES["happy"]
+            self.hands = self.feet = None
+            return
+        self.phase, self.lean = 0.0, 0.0
+        self._breathe(now)
+        self.facing = _mix(self.facing, way * 0.6, 0.15)
+        self.look = _aim((self.x, self._face_y()),
+                         (van.x, self._face_y() - 14.0))
+        self.face = FACES["happy"]
+        self.hands = self.feet = None
+
+    def _do_lick(self, now, dt):
+        """Off with his cone, in no hurry at all."""
+        x1, x2 = self._walls()
+        self.y = self._floor_y()
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        u = now - self.since
+        gap = self._lick_x - self.x
+        if abs(gap) > 6.0:
+            way = 1.0 if gap > 0 else -1.0
+            self.x = _clamp(self.x + way * WALK_SPEED * 0.6 * dt, x1, x2)
+            self.phase += WALK_SPEED * 0.6 * dt / STEP_PX * math.pi
+            self.facing, self.lean = way * 0.5, way * 1.2
+        else:
+            self.phase, self.lean = 0.0, 0.0
+            self.facing = _mix(self.facing, 0.0, 0.1)
+        # The cone hand stays up by his face, and dips for each lick.
+        dip = max(0.0, math.sin(u * 2.2 * TAU))
+        fy = self._face_y()
+        side = 1.0 if self.facing >= 0 else -1.0
+        self.hands = ((self.x + side * 9.0, fy + 7.0 - dip * 3.5), None)
+        self.feet = None
+        self.look = (side * 1.5, 1.8)
+        self.face = FACES["happy"]._replace(open=0.25 * dip)
+        if now >= self._until:
+            self.prop = None
+            self._stir_at = now
+            self._begin("rest", now)
+
+    def _do_errand(self, now, dt):
+        """Off the side of the screen for a pizza, and back with the box.
+
+        The same three legs the errand for wood has, and the same trick: he
+        is never hidden, he has just walked off the edge of his own window.
+        No scene behind this one - the picnic is whoever is about when he
+        gets back.
+        """
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.feet = None
+        self.y = self._floor_y()
+        self.face = FACES["happy"]
+        self.look = (0.0, 0.0)
+        x1, x2 = self._walls()
+        if now - self.since > FETCH_MAX_S:
+            self.prop = None
+            self.x = _clamp(self.x, x1, x2)
+            self._begin("rest", now)
+            return
+        if self._fetch == "out":
+            way = self._fetch_way
+            self.x += way * FETCH_SPEED * dt
+            self.phase += FETCH_SPEED * dt / STEP_PX * math.pi
+            self.facing, self.lean = way * 0.62, way * 3.0
+            self.hands = None
+            if self.x < x1 - FETCH_OFF or self.x > x2 + FETCH_OFF:
+                self._fetch = "back"
+                self._until = now + FETCH_GONE_S
+            return
+        if now < self._until:
+            return                      # out of sight, paying for it
+        self.prop = "pizza"
+        way = 1.0 if self._site_x > self.x else -1.0
+        self.x += way * FETCH_SPEED * dt
+        self.phase += FETCH_SPEED * dt / STEP_PX * math.pi
+        self.facing, self.lean = way * 0.62, way * 3.0
+        fy = self._face_y() + HEAD * 0.35
+        self.hands = ((self.x - BOX_W / 2.0, fy), (self.x + BOX_W / 2.0, fy))
+        if abs(self.x - self._site_x) < FETCH_SPEED * dt + 0.5:
+            self.x = self._site_x
+            _serve_picnic(self, now)
+
+    def _do_picnic(self, now, dt):
+        """Sat around the box, working through a slice."""
+        x1, x2 = self._walls()
+        self.y = self._floor_y()
+        self.squash, self.roll = 1.0, 0.0
+        gap = self._lick_x - self.x
+        if abs(gap) > 4.0 and now < self._until:
+            way = 1.0 if gap > 0 else -1.0
+            self.x = _clamp(self.x + way * WALK_SPEED * dt, x1, x2)
+            self.phase += WALK_SPEED * dt / STEP_PX * math.pi
+            self.crouch = 0.0
+            self.facing, self.lean = way * 0.5, way * 1.2
+            self.hands = self.feet = None
+            self.face = FACES["happy"]
+            return
+        # Down at his place, face to the box, slice going up and down - out
+        # of step with his neighbour, because six men chewing on one beat is
+        # a chorus line, not a picnic.
+        floor = self._floor_y()
+        way = 1.0 if self._site_x >= self.x else -1.0
+        u = now - self.since
+        self.phase, self.lean = 0.0, 0.0
+        self.crouch = 0.62
+        self.facing = _mix(self.facing, way * 0.6, 0.15)
+        self._breathe(now, 0.02, 0.25)
+        bite = max(0.0, math.sin((u + self._queue_i * 0.7) * BITE_HZ * TAU))
+        fy = self._face_y()
+        self.hands = ((self.x + way * (9.0 - bite * 4.0),
+                       fy + 9.0 - bite * 6.0), None)
+        self.feet = ((self.x + way * 9.0, floor),
+                     (self.x + way * 16.0, floor))
+        self.look = (way * 1.4, 2.2) if bite < 0.4 else (0.0, 0.6)
+        self.face = FACES["happy"]._replace(open=0.3 * bite)
+        if now >= self._until:
+            self.prop = None            # the host's box goes with the rest
+            self._stir_at = now
+            self._begin("rest", now)
+
+    def _do_help(self, now, dt):
+        """Over to whatever has happened, and then straight on the phone.
+
+        The walk is not the point and neither is the phone - what matters is
+        that somebody did something, in front of you, before anything turned
+        up. An ambulance that arrives out of nowhere is a bug with a siren.
+        """
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.y = self._floor_y()
+        fy = self._face_y()
+        if self._help_leg == "over":
+            gap = self._help_x - self.x
+            if abs(gap) > 8.0 and now - self.since < HELP_MAX_S:
+                way = 1.0 if gap > 0 else -1.0
+                x1, x2 = self._walls()
+                self.x = _clamp(self.x + way * HELP_WALK * dt, x1, x2)
+                self.phase += HELP_WALK * dt / STEP_PX * math.pi
+                self.facing, self.lean = way * 0.62, way * 3.4
+                self.face = FACES["panic"]
+                self.hands = self.feet = None
+                self.look = _aim((self.x, fy), (self._help_at, fy))
+                return
+            self._help_leg = "call"
+            self._until = now + CALL_S
+            self.prop = "phone"
+            self.since = now
+        # On the phone: it at his ear, the other hand going, and looking at
+        # the thing he is describing rather than at the phone.
+        u = now - self.since
+        self.phase, self.lean = 0.0, 0.0
+        self.facing = _mix(self.facing, 0.55, 0.12)
+        self.hands = ((self.x - 13.0, fy - 2.0),
+                      (self.x + 18.0 + math.sin(u * 5.0) * 6.0, fy + 8.0))
+        self.look = _aim((self.x, fy), (self._help_at, fy + 10.0))
+        self.face = FACES["panic"]._replace(
+            open=0.25 + 0.5 * abs(math.sin(now * 4.0 * TAU)))
+        self._say("!")
+        if now < self._until:
+            return
+        self.prop = None
+        self._mark = None
+        yard.call_van(self._help_kind, self._help_at, self._floor_y())
+        self._stir_at = now
+        self._begin("rest", now)
+
+    def _do_carted(self, now, dt):
+        """Onto the stretcher, into the van, and away with it.
+
+        He is carried by the van rather than by anything he does: the yard
+        says where the stretcher is and he lies on it. Keeping him a roamer
+        instead of drawing a body on the prop is what makes it him being
+        carried off - his colours, his face, and his note to come back from.
+        """
+        van = yard.van()
+        spot = None if van is None else van.stretcher()
+        self.squash, self.crouch = 1.0, 0.0
+        self.phase, self.lean = 0.0, 0.0
+        self.hands = self.feet = None
+        self.facing = 0.0
+        self.face = FACES["dazed"]
+        self.look = (0.0, -1.0)
+        if spot is not None:
+            self.x, self.y = spot[0], spot[1] + STAND_H
+            self.roll = math.pi / 2.0 * (1.0 if van.way > 0 else -1.0)
+            return
+        if van is not None and van.phase == "away":
+            # Inside it. Withdrawn rather than drawn over the doors, and the
+            # van is what takes him off the screen.
+            try:
+                if self.winfo_viewable():
+                    self.withdraw()
+            except tk.TclError:
+                pass
+            return
+        # It has gone, or it never came. Either way he is not lying there for
+        # the rest of the afternoon.
+        self.roll = 0.0
+        self.go_home()
+
+    def _run_pose(self, way, dt):
+        """What a running man looks like, whichever kind of running it is.
+
+        The legs go at the pace he is running, not at the pace he is getting
+        anywhere: a chaser holding his distance is still running, and so is
+        a man who has just crossed the edge of the screen.
+        """
+        self.phase += RUN_SPEED * (STEP if STEP is not None else 1.0 / 60.0) \
+            / STEP_PX * math.pi
+        self.facing, self.lean = way * 0.5, way * RUN_LEAN
+        self.look = (0.0, 0.0)
+        self.face = FACES["laugh" if self._run_leg == "away" else "strain"]
+        fy = self._face_y()
+        swing = math.sin(self.phase)
+        self.hands = ((self.x + way * (12.0 + swing * 14.0), fy + 4.0),
+                      (self.x - way * (12.0 - swing * 14.0), fy + 10.0))
+        self.feet = None
+        self.squash, self.roll, self.crouch = 1.0, 0.0, 0.0
+        self.y = self._floor_y() - abs(math.sin(self.phase)) * RUN_BOB
 
     def _do_panic(self, now, dt):
         """Out of the wreck, and running.
@@ -2443,6 +4027,7 @@ class Roamer(tk.Toplevel):
             self.scene = None
             self._begin("rest", now)
             return
+        self._breathe(now)
         beat, u = _beat(scene.table, scene.i)
         if beat == "done":
             _close(scene, now)
@@ -2494,6 +4079,7 @@ class Roamer(tk.Toplevel):
             self._begin("rest", now)
             return
         self.squash, self.roll, self.crouch, self.lean = 1.0, 0.0, 0.0, 0.0
+        self._breathe(now)
         self.hands = self.feet = None
         self.y = self._floor_y()
         self.face = _face_mix(FACES["calm"], FACES["happy"], 0.30)
@@ -2930,6 +4516,44 @@ class Roamer(tk.Toplevel):
         self.carry = False
         self._begin("fetch", now)
 
+    def feel(self, mood, seconds=MOOD_S):
+        """Put a mood on him. Unknown moods are simply not moods."""
+        if mood is not None and mood not in MOOD_FACE:
+            return False
+        self.mood = mood
+        self._mood_until = _time() + float(seconds)
+        return True
+
+    def perform(self, act, seconds=None):
+        """Do one of the things in ACTS, by name. False if it is not one."""
+        if act not in ACTS:
+            return False
+        now = _time()
+        self._leave_scene(now)
+        if act == "celebrate":
+            self._cheer_x = self.x
+            self._begin("cheer", now)
+        elif act == "sleep":
+            self._begin("sleep", now)
+        else:
+            state = "phone" if act in ("phone", "call") else act
+            self._phone_leg = "talk" if act == "call" else "type"
+            self._begin(state, now)
+            if seconds is not None or ACTS[act] is not None:
+                self._until = now + float(
+                    seconds if seconds is not None else ACTS[act])
+        _cancel()
+        _arm(TICK_MS)
+        return True
+
+    def _breathe(self, now, depth=0.018, rate=0.30):
+        """The idle breath: about eighteen a minute, and barely there.
+
+        Squash only - the width compensation in the figure turns it into the
+        chest filling and emptying rather than the whole man scaling.
+        """
+        self.squash = 1.0 + depth * math.sin(now * rate * TAU)
+
     def _idle(self, now):
         if self.state in ("held", "fall", "wtf"):
             self._blinking = False
@@ -2950,6 +4574,17 @@ class Roamer(tk.Toplevel):
         # ...and so does the fright, for the same reason: a man who is
         # perfectly calm the instant he stops running reads as a bug rather
         # than as somebody getting his breath back.
+        if self.mood is not None and now >= self._mood_until:
+            self.mood = None
+        if self.mood is None and self.temper is not None:
+            # A mood wears off; a temper is what the note says, so it is
+            # simply put back on.
+            self.mood = self.temper
+            self._mood_until = now + MOOD_S
+        if self.mood is not None:
+            look = (GRIN if self.mood == "angry" and self.temper == "angry"
+                    else FACES[MOOD_FACE[self.mood]])
+            self.face = _face_mix(self.face, look, MOOD_MIX)
         # A poke he gets over about as fast as he got the fright, and for the
         # same reason: a face that snaps back on the landing frame reads as a
         # bug rather than as somebody deciding to let it go.
@@ -3041,6 +4676,63 @@ class Roamer(tk.Toplevel):
                 feet=_shift(self.feet, dx, dy),
                 face=face, look=self.look, squash=self.squash, roll=self.roll,
                 tag="walker")
+        if self.prop == "phone" and self.hands is not None:
+            # In whichever hand is doing the holding: the one at his ear when
+            # he is talking, the near one when he is thumbing at it.
+            hand = self.hands[0] if self.hands[0] is not None else self.hands[1]
+            if hand is not None:
+                hx, hy = hand[0] - dx, hand[1] - dy
+                cv.create_rectangle(hx - PHONE_W / 2.0, hy - PHONE_H / 2.0,
+                                    hx + PHONE_W / 2.0, hy + PHONE_H / 2.0,
+                                    fill=PHONE_C, outline=self.ink, width=1,
+                                    tags="walker")
+        if self.prop == "cone" and self.hands is not None:
+            hand = self.hands[0] if self.hands[0] is not None else self.hands[1]
+            if hand is not None:
+                hx, hy = hand[0] - dx, hand[1] - dy
+                cv.create_polygon(hx - 4.0, hy - 1.0, hx + 4.0, hy - 1.0,
+                                  hx, hy + 11.0, fill=CONE_C,
+                                  outline=self.ink, width=1, tags="walker")
+                cv.create_oval(hx - 5.0, hy - 10.0, hx + 5.0, hy,
+                               fill=SCOOP_C, outline=self.ink, width=1,
+                               tags="walker")
+        if self.prop == "pizza" and self.hands is not None:
+            # The box flat across both hands, the way the plank rides.
+            (lx, ly), (rx, ry) = self.hands
+            mid = (ly + ry) / 2.0 - dy
+            cv.create_rectangle(lx - dx - 2.0, mid - BOX_H, rx - dx + 2.0,
+                                mid, fill=BOX_C, outline=self.ink, width=1,
+                                tags="walker")
+        if self.prop == "pizza_open" and self.state == "picnic":
+            # ponytail: drawn only while the picnic runs; a host yanked away
+            # takes the box with him rather than leaving one painted forever.
+            bx = self._site_x - dx
+            base = self._floor_y() - dy
+            cv.create_rectangle(bx - BOX_W / 2.0, base - BOX_H,
+                                bx + BOX_W / 2.0, base, fill=BOX_C,
+                                outline=self.ink, width=1, tags="walker")
+            cv.create_polygon(bx - BOX_W / 2.0, base - BOX_H,
+                              bx - BOX_W / 2.0 - 5.0, base - BOX_H - 13.0,
+                              bx + BOX_W / 2.0 - 9.0, base - BOX_H - 13.0,
+                              bx + BOX_W / 2.0, base - BOX_H, fill=BOX_C,
+                              outline=self.ink, width=1, tags="walker")
+            cv.create_oval(bx - 8.0, base - BOX_H - 4.0, bx + 8.0,
+                           base - BOX_H + 3.0, fill=CRUST_C,
+                           outline=self.ink, width=1, tags="walker")
+            for px_, py_ in ((-3.5, -1.5), (3.0, -0.5), (0.0, 1.0)):
+                cv.create_oval(bx + px_ - 1.4, base - BOX_H + py_ - 1.4,
+                               bx + px_ + 1.4, base - BOX_H + py_ + 1.4,
+                               fill=PEP_C, outline="", tags="walker")
+        if self._t < self._hat_until:
+            # The party hat, stuck straight on whatever he is doing.
+            top = self.y - dy - STAND_H - HEAD / 2.0
+            hx = self.x - dx
+            cv.create_polygon(hx - 7.0, top + 3.0, hx + 7.0, top + 3.0,
+                              hx, top - HAT_H, fill=HAT_C,
+                              outline=self.ink, width=1, tags="walker")
+            cv.create_oval(hx - 2.4, top - HAT_H - 4.5, hx + 2.4,
+                           top - HAT_H + 0.3, fill=POM_C, outline="",
+                           tags="walker")
         if self.carry and self.hands is not None:
             # After the figure, so it is in front of him rather than behind
             # his chest, and in the yard's own wood so a plank and a wall are

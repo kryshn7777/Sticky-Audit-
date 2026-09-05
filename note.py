@@ -1392,6 +1392,9 @@ class NoteWindow(tk.Toplevel):
         self.note["body"] = self.body.get("1.0", "end-1c")
         self.note["marks"] = self._read_marks()
         self._maybe_finished(was, self.note["body"])
+        # The words colour whoever came off this note - see roamer.retune.
+        roamer.retune(self.note["id"], "%s %s" % (self.note["heading"],
+                                                  self.note["body"]))
 
     def _maybe_finished(self, was, now_text):
         """The last box on this note has just been ticked.
