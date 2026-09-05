@@ -116,9 +116,21 @@ FOLD_LIGHT = 34.0     # how far that light reaches out across the page
 FOLD_BOW = 9.0        # how far the folded edge bulges: paper does not fold flat
 FLIP_PAD = (86, 96)   # room to the right of and below the note for the walk
 
-EYE_DX = 6.5          # eye spacing either side of the face's centre
-EYE_R = 2.8           # resting eye
-EYE_R_WIDE = 5.0      # delighted eye
+EYE_DX = 7.2          # eye spacing either side of the face's centre
+EYE_R = 3.2           # resting eye
+EYE_R_WIDE = 5.2      # delighted eye
+# The kawaii geometry, and all of it is placement: the eyes sit low on the
+# face and far apart, which is what buys him the long forehead, and the
+# mouth stays tucked up close underneath them. Round corners and a blush do
+# the rest. The blush is skipped the moment the face stops being friendly -
+# pink cheeks on a man swinging a punch read as paint, not feeling.
+EYE_DROP = 3.2        # how far below the middle of the face the eyes sit
+CHEEK_DX = 4.4        # how far outside the eyes the blush sits
+CHEEK_DY = 4.6        # ...and below them
+CHEEK_W, CHEEK_H = 2.8, 1.9
+CHEEK_C = "#EFA9A5"
+HEAD_ROUND = 6.5      # the corners. Round enough to be soft, square enough
+                      # that he is still the box man
 GLINT_R = 1.8         # the white catchlight that appears with it
 PUPIL_TRAVEL = 4.0    # furthest an eye ever slides from its resting spot
 LOOK_RANGE = 150.0    # past this the eyes are fully over; only the angle moves
@@ -319,7 +331,8 @@ class Mascot:
 
         # The eyes go on last so nothing is ever painted over them.
         hx, hy = self._head
-        self._eye_home = ((hx - EYE_DX, hy), (hx + EYE_DX, hy))
+        self._eye_home = ((hx - EYE_DX, hy + EYE_DROP),
+                          (hx + EYE_DX, hy + EYE_DROP))
         self._eyes = tuple(cv.create_oval(0, 0, 0, 0, fill=ink, outline="",
                                           tags="mascot")
                            for _ in self._eye_home)
@@ -399,11 +412,19 @@ class Mascot:
         """The square face. It is the whole character: arms come out of its
         sides and legs out of its bottom, and there is nothing in between."""
         half = HEAD / 2.0
-        self._face_item = self.cv.create_rectangle(
-            cx - half, cy - half, cx + half, cy + half,
-            fill=self._skin, outline=self._limb, width=2, tags="mascot")
+        self._face_item = self.cv.create_polygon(
+            *_rounded(cx - half, cy - half, cx + half, cy + half, HEAD_ROUND),
+            fill=self._skin, outline=self._limb, width=2, smooth=True,
+            tags="mascot")
         self._head = (cx, cy - HEAD * 0.06)
         self._face_box = (cx - half, cy - half, cx + half, cy + half)
+        hx, hy = self._head
+        for side in (-1.0, 1.0):
+            bx = hx + side * (EYE_DX + CHEEK_DX)
+            by = hy + EYE_DROP + CHEEK_DY
+            self.cv.create_oval(bx - CHEEK_W, by - CHEEK_H,
+                                bx + CHEEK_W, by + CHEEK_H,
+                                fill=CHEEK_C, outline="", tags="mascot")
 
     # --------------------------------------------------------------- the poses
 
@@ -537,8 +558,12 @@ class Mascot:
         hw = (fx1 - fx0) / 2.0 * fsx
         h = (fy1 - fy0) * fsy
         try:
-            self.cv.coords(self._face_item, cx - hw + ox, base - h + oy,
-                           cx + hw + ox, base + oy)
+            # The face is a rounded polygon now, not a rectangle: feeding
+            # coords() two corners would replace its twelve points with a
+            # degenerate two-point sliver and the box would vanish mid-squash.
+            self.cv.coords(self._face_item,
+                           *_rounded(cx - hw + ox, base - h + oy,
+                                     cx + hw + ox, base + oy, HEAD_ROUND))
         except tk.TclError:
             pass
 
@@ -1211,7 +1236,24 @@ FACES = {
     "wtf":    Face(2.0, 0.9, -1.0, -0.9, 1.2, -0.7, 0.5, 0.0),
     "dazed":  Face(1.3, 0.4, 0.6, 0.3, 0.8, -0.5, 0.4, 0.6),
     "plead":  Face(0.10, 1.0, 0.55, 1.0, 0.85, -1.0, 0.6, 1.0),
+    # Sad is not cross with the brows the other way up: the eyes stay open and
+    # the inner ends of the brows go up, which is the whole difference between
+    # somebody upset and somebody annoyed.
+    "sad":    Face(0.95, 0.45, 0.6, 0.75, 0.8, -0.9, 0.05, 0.0),
+    # Sleepy is not asleep either - he is still looking at you, barely.
+    "dozy":   Face(0.30, 0.85, 0.15, 0.25, 0.5, -0.15, 0.2, 0.0),
 }
+
+
+def _rounded(x1, y1, x2, y2, r):
+    """A rectangle with soft corners, as smooth-polygon points.
+
+    The doubled points along each side are what keep the sides straight when
+    Tk smooths it: a bare four-corner polygon under smooth=True bows into a
+    pillow.
+    """
+    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
 
 
 def _walker(cv, cx, cy, phase, skin, limb, ink, facing=0.0, hand=None,
@@ -1257,6 +1299,16 @@ def _walker(cv, cx, cy, phase, skin, limb, ink, facing=0.0, hand=None,
     hw = hh * (1.0 - 0.14 * turn)
     stride = math.sin(phase) if phase is not None else 0.0
     step = math.cos(phase) if phase is not None else 0.0
+    # The springy step. Every walk in the app comes through here, so every
+    # walk gets it: a touch of squash onto each footfall, a touch of stretch
+    # through mid-swing, and a little roll into the stride. Recovered from as
+    # fast as it arrives - the reference rule is felt, not seen - and only
+    # when the caller has not posed those axes deliberately.
+    if phase is not None:
+        if squash == 1.0:
+            squash = 1.0 - 0.045 * stride * stride + 0.035 * step * step
+        if roll == 0.0:
+            roll = 0.028 * stride
 
     cy += abs(stride) * BOB_PX + crouch * 7.0  # lowest at full stride
     hip_y = cy + hh
@@ -1346,10 +1398,9 @@ def _walker(cv, cx, cy, phase, skin, limb, ink, facing=0.0, hand=None,
         cv.create_oval(hxx - 4, hyy - 4, hxx + 4, hyy + 4, fill=skin,
                        outline=limb, width=2, tags=tag)
 
-    head = [hx - hw_d, fy - hh_d, hx + hw_d, fy - hh_d,
-            hx + hw_d, fy + hh_d, hx - hw_d, fy + hh_d]
+    head = _rounded(hx - hw_d, fy - hh_d, hx + hw_d, fy + hh_d, HEAD_ROUND)
     cv.create_polygon(*(head if rot is None else rot(head)), fill=skin,
-                      outline=limb, width=2, tags=tag)
+                      outline=limb, width=2, smooth=True, tags=tag)
     if turn > 0.45:                    # the bridge of his nose sells the turn
         nose = 2.2 * (turn - 0.45) / 0.55
         bridge = [hx + way * hw_d, fy - hh_d * 0.06,
@@ -1371,6 +1422,7 @@ def _walker_face(cv, spot, bone, hx, fy, hw, hh, way, turn, skin, limb,
     same thing and keeps his face a face.
     """
     eye_c = hx + way * hw * 0.22 * turn
+    drop = EYE_DROP * (hh / (HEAD / 2.0))   # low on the face, squash and all
     sep = EYE_DX * (1.0 - 0.40 * turn)
     scale = 1.0 if face is None else face.eye
     # Eyes that go wide have to move apart as well as grow. Turning him also
@@ -1381,7 +1433,7 @@ def _walker_face(cv, spot, bone, hx, fy, hw, hh, way, turn, skin, limb,
     for eye in (-1.0, 1.0):
         near = eye * way > 0
         r = EYE_R * scale * (1.0 if near else 1.0 - 0.50 * turn)
-        ex, ey = eye_c + eye * sep, fy
+        ex, ey = eye_c + eye * sep, fy + drop
         if face is not None and scale < 0.3:
             # Shut, and which way it curls is the whole difference between a
             # happy squint and eyes screwed shut against something. lid picks,
@@ -1414,6 +1466,19 @@ def _walker_face(cv, spot, bone, hx, fy, hw, hh, way, turn, skin, limb,
         else:
             cv.create_rectangle(ox - r - 1, oy + r - cut, ox + r + 1,
                                 oy + r + 1, fill=skin, outline="", tags=tag)
+    # The blush, outside and below the eyes, and only while the face is a
+    # friendly one. The far cheek narrows with the turn the way the far eye
+    # does, or a turned head wears one round sticker on its edge.
+    if face is None or (face.curve >= 0.0 and face.brow >= -0.2):
+        # Below the eyes whatever size they have gone to: a blush that a
+        # pair of delighted saucers overlaps reads as sore eyes.
+        cheek_y = fy + drop + max(CHEEK_DY, EYE_R * scale + 1.2)
+        for eye in (-1.0, 1.0):
+            k = 1.0 if eye * way > 0 else 1.0 - 0.5 * turn
+            bx, by = spot(eye_c + eye * (sep + CHEEK_DX * k), cheek_y)
+            cv.create_oval(bx - CHEEK_W * k, by - CHEEK_H,
+                           bx + CHEEK_W * k, by + CHEEK_H,
+                           fill=CHEEK_C, outline="", tags=tag)
     if face is None:
         return
 
@@ -1423,7 +1488,7 @@ def _walker_face(cv, spot, bone, hx, fy, hw, hh, way, turn, skin, limb,
             # Clear of the eye itself, whatever size it has gone to. Saucer
             # eyes with the brows pinned to a fixed height come out as one
             # black smudge across the middle of his face.
-            base = fy - EYE_R * scale - 3.2 - face.brow * 2.4
+            base = fy + drop - EYE_R * scale - 3.2 - face.brow * 2.4
             inner, outer = eye * -1.6, eye * 4.2   # inner end nearer his nose
             bone((*spot(ex + inner, base - face.tilt * 2.0),
                   *spot(ex + outer, base + face.tilt * 1.4)), width=1)
@@ -1434,7 +1499,9 @@ def _walker_face(cv, spot, bone, hx, fy, hw, hh, way, turn, skin, limb,
         # with a height of its own rather than a dot. A fixed height puts the
         # mouth inside a pair of saucer eyes and the whole face becomes soup.
         low = 3.2 if scale < 0.3 else EYE_R * scale
-        my = fy + max(hh * 0.40, low + 4.0)
+        # Tucked close under the eyes rather than at the bottom of his face:
+        # features huddled together is half of what cute is.
+        my = fy + drop + max(hh * 0.26, low + 3.4)
         if face.open > 0.08:
             mh = 1.5 + face.open * 6.0
             ax, ay = spot(hx - mw * 0.6, my - mh * 0.5)
