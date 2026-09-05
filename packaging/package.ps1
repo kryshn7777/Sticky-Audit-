@@ -62,6 +62,53 @@ $msix = Join-Path $out "Sticky_$Version.msix"
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed" }
 Write-Host "wrote $msix"
 
+Write-Host "== itch.io zip =="
+# Flat zip for itch.io: no MSIX identity, no Store signing, just the exe folder.
+$itch = Join-Path $out "itch\Sticky"
+if (Test-Path $itch) { Remove-Item $itch -Recurse -Force }
+New-Item -ItemType Directory -Force $itch | Out-Null
+Copy-Item (Join-Path $root "dist\Sticky\*") $itch -Recurse
+
+$readme = @"
+Sticky $Version for Windows
+=========================
+
+Sticky notes on your desktop, with a crew of little box-men who live on
+your taskbar, read what you write, and act on it.
+
+RUN
+  1. Unzip anywhere. Keep the folder together: Sticky.exe needs _internal.
+  2. Double-click Sticky.exe.
+  3. Windows SmartScreen may warn the first time, because this build is
+     not code-signed. Click "More info", then "Run anyway".
+
+TRY
+  - Type "pizza" on a note. Somebody goes to fetch one.
+  - Type "birthday". Hats.
+  - Type "zzz". He naps.
+  - Type "grr". He gets grumpy and turns the fun down.
+  - Right-click a note > Scenes to ask for a race, a party, the ice
+    cream van, a pizza run or a sing-along.
+  - Ctrl+Alt+N drops a new note where your pointer is.
+  - The board (Sticky in your taskbar) lists every note and, at the
+    bottom, "What do they react to?"
+
+YOUR NOTES
+  Saved in %APPDATA%\StickyNote\notes.json and nowhere else. No account,
+  no network, nothing phones home.
+
+UNINSTALL
+  Delete the folder. Delete %APPDATA%\StickyNote too if you want the
+  notes gone.
+
+Source: https://github.com/kryshn7777/Sticky-Audit-
+"@
+Set-Content (Join-Path $itch "README.txt") $readme -Encoding utf8
+
+$zip = Join-Path $out "Sticky-$Version-win64.zip"
+Compress-Archive -Path $itch -DestinationPath $zip -Force
+Write-Host "wrote $zip"
+
 if ($Sign) {
     # Self-signed cert for a local install test only. The subject must equal
     # the manifest Publisher exactly or Windows refuses the package.
