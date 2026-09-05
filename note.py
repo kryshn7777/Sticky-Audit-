@@ -813,6 +813,14 @@ class NoteWindow(tk.Toplevel):
                              command=self._menu_mascot)
         menu.add_command(label="Send him home", command=self._menu_home)
         menu.add_command(label="Sit with me  (25 min)", command=self._menu_focus)
+        self.menu_scenes = tk.Menu(menu, tearoff=0)
+        for label, command in (("Race", self._scene_race),
+                               ("Party", self._scene_party),
+                               ("Pizza run", self._scene_pizza),
+                               ("Ice cream van", self._scene_icecream),
+                               ("Sing-along", self._scene_song)):
+            self.menu_scenes.add_command(label=label, command=command)
+        menu.add_cascade(label="Scenes", menu=self.menu_scenes)
         menu.add_command(label="New note", command=self._menu_new)
         menu.add_separator()
         self.menu_history = tk.Menu(menu, tearoff=0)
@@ -822,6 +830,7 @@ class NoteWindow(tk.Toplevel):
         self.menu = menu
         self._unpin_index = menu.index("Unpin")
         self._home_index = menu.index("Send him home")
+        self._scenes_index = menu.index("Scenes")
 
     def earlier_versions(self):
         """Saved versions older than what is on the note, newest first."""
@@ -889,6 +898,10 @@ class NoteWindow(tk.Toplevel):
         self.menu.entryconfigure(
             self._home_index,
             state="normal" if self.mascot.away else "disabled")
+        # Nothing to ask for with the crew switched off.
+        self.menu.entryconfigure(
+            self._scenes_index,
+            state="normal" if self.mascot_enabled() else "disabled")
 
     def _context_menu(self, event):
         self.lift()
@@ -968,6 +981,27 @@ class NoteWindow(tk.Toplevel):
 
     def _menu_focus(self):
         roamer.focus(self)
+
+    # The scenes, on demand. Each one is the same thing the crew does off its
+    # own bat, asked for rather than waited on: a refusal is silence, the way
+    # it is when they turn one down by themselves - a man who cannot race just
+    # does not race, and nobody puts a dialog up about it.
+    # Each hands back whether it happened. The menu ignores it; the suite
+    # cannot ask the crew "did you refuse" any other way.
+    def _scene_race(self):
+        return roamer.race()
+
+    def _scene_party(self):
+        return roamer.party(self.note["id"])
+
+    def _scene_pizza(self):
+        return roamer.pizza(self.note["id"])
+
+    def _scene_icecream(self):
+        return roamer.icecream()
+
+    def _scene_song(self):
+        return roamer.act(roamer.for_note(self.note["id"]), "sing")
 
     def _menu_home(self):
         guy = roamer.for_note(self.note["id"])

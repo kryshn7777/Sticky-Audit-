@@ -674,6 +674,10 @@ _root = None
 STEP = None             # tests pin the step so the physics repeats exactly
 SPONTANEOUS = True      # ...and everything they start themselves: scraps,
                         # ambulances, songs. Pinned off by the suite.
+HASTE = 1.0             # how much sooner every scene comes round. One for a
+                        # normal day; the app winds it down for the first ten
+                        # minutes, so somebody who has just installed this sees
+                        # what the crew does instead of waiting on the odds.
 _stamp = None
 _last = None            # the last frame the yard was stepped on
 
@@ -1024,11 +1028,13 @@ def _due(name, every, now, scale=1.0):
     """One recurring clock, by module-global name.
 
     The first look only winds it - a crew four frames old has not had time
-    to want anything - and every firing winds the next.
+    to want anything - and every firing winds the next. HASTE is in here
+    rather than at the call sites so every clock that goes through this one
+    is wound the same, this one and any later one.
     """
     at = globals()[name]
     if at == 0.0 or now >= at:
-        globals()[name] = now + random.uniform(*every) * scale
+        globals()[name] = now + random.uniform(*every) * scale * HASTE
         return at != 0.0
     return False
 
@@ -1131,9 +1137,9 @@ def _trouble(now):
     # only winds the clocks: a crew that has been up for four frames has had
     # no time to fall out with anybody or to burst into song.
     if _song_at == 0.0:
-        _song_at = now + random.uniform(*SONG_EVERY)
+        _song_at = now + random.uniform(*SONG_EVERY) * HASTE
     elif now >= _song_at:
-        _song_at = now + random.uniform(*SONG_EVERY)
+        _song_at = now + random.uniform(*SONG_EVERY) * HASTE
         idle = [guy for guy in crew if guy.state in ("rest", "walk")
                 and _game(guy, now)]
         sunny = [guy for guy in idle if guy.temper == "happy"]
@@ -1141,7 +1147,7 @@ def _trouble(now):
             random.choice(sunny or idle).perform("sing")
             return
     if _anger_at == 0.0:
-        _anger_at = now + random.uniform(*ANGER_EVERY)
+        _anger_at = now + random.uniform(*ANGER_EVERY) * HASTE
         return
     if now < _anger_at:
         return
@@ -1151,8 +1157,8 @@ def _trouble(now):
             if guy.state in ("rest", "walk", "chat") and guy.floor is not None]
     keen = [guy for guy in idle if guy.temper == "angry"]
     # An angry note on the desk keeps the peace short.
-    _anger_at = now + random.uniform(*ANGER_EVERY) * (KEEN_HASTE if keen
-                                                      else 1.0)
+    _anger_at = now + random.uniform(*ANGER_EVERY) * HASTE * (KEEN_HASTE if keen
+                                                              else 1.0)
     if len(idle) < 2:
         return
     calm = [guy for guy in idle if guy.temper != "sad"]
@@ -1672,6 +1678,60 @@ def act(guy, what, seconds=None):
     if guy is None or guy not in crew:
         return False
     return guy.perform(what, seconds)
+
+
+def party(note_id, now=None):
+    """Throw the party for this note's man, asked rather than read.
+
+    The birthday word does this by itself, once per note. This is the same
+    fuss on demand, and it does not touch the one-shot latch: ask twice and
+    you get two parties.
+    """
+    now = _time() if now is None else now
+    guy = for_note(note_id)
+    if guy is None:
+        return False
+    _party(guy, now)
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
+def pizza(note_id, now=None):
+    """Send this note's man off for a pizza, asked rather than read.
+
+    False if he is up to something he cannot be pulled off - held, asleep,
+    already on an errand - which is the errand's own rule, not a new one.
+    """
+    now = _time() if now is None else now
+    guy = for_note(note_id)
+    if guy is None:
+        return False
+    _order_pizza(guy, now)
+    if guy.state != "errand":
+        return False            # he was busy; _order_pizza left him alone
+    _cancel()
+    _arm(TICK_MS)
+    return True
+
+
+def icecream(now=None):
+    """Call the van round. False if there is nobody to serve, or it is here.
+
+    The same conditions the clock uses, without the clock: two men stood
+    about, no van already on the street, and nobody mid-race.
+    """
+    now = _time() if now is None else now
+    idle = [guy for guy in crew
+            if guy.state in ("rest", "walk", "chat", "watch")
+            and guy.floor is not None]
+    if len(idle) < 2 or yard.van() is not None or _racers:
+        return False
+    mid = sum(guy.x for guy in idle) / len(idle)
+    yard.call_van("icecream", mid, idle[0]._floor_y())
+    _cancel()
+    _arm(TICK_MS)
+    return True
 
 
 def scrap(one, other, seconds=None):

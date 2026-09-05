@@ -7,6 +7,7 @@ quits, so the notes on the desktop stay exactly where they were.
 import time
 import tkinter as tk
 
+import roamer
 import store
 import winkit
 from note import pick_font, shade
@@ -25,6 +26,38 @@ def ago(when):
         if seconds < limit:
             return "just now" if seconds < 10 and label == "s" else "%d%s ago" % (seconds // size, label)
     return time.strftime("%d %b", time.localtime(when))
+
+
+def legend_text():
+    """What the crew reads, read out of the crew's own word lists.
+
+    Built rather than written down: a list typed out here would be a second
+    copy of roamer's words, and the copy is wrong the day somebody adds a
+    word to the real one.
+    """
+    moods = {"happy": "he cheers up, and the ice cream van comes round sooner",
+             "sad": "he keeps out of the way, and runs from any trouble",
+             "angry": "he scowls, picks fights, and turns most fun down",
+             "sleepy": "he yawns, and naps in a heap with any other sleepy one"}
+    lines = ["Whatever you write on a note, the little guy who lives on it",
+             "reads. Some words change him:", ""]
+    for mood, effect in moods.items():
+        words = ", ".join(roamer.TEMPER_WORDS[mood][:8])
+        lines.append("%s - %s" % (mood.upper(), effect))
+        lines.append("    %s, ..." % words)
+        lines.append("")
+    lines += ["%s - he goes off and fetches one, and the crew sits down to it"
+              % ", ".join(roamer.PIZZA_WORDS),
+              "",
+              "%s - hats, a song and a party. Once per note"
+              % ", ".join(roamer.BDAY_WORDS),
+              "",
+              "[ ] boxes - he nags about the ones left unticked, and the whole",
+              "bar celebrates when the last one goes.",
+              "",
+              "The rest - races, naps, stalking your pointer - they get up to",
+              "on their own. Right-click a note and open Scenes to ask."]
+    return "\n".join(lines)
 
 
 class Board(tk.Toplevel):
@@ -173,10 +206,19 @@ class Board(tk.Toplevel):
                            activebackground=t["bg"], activeforeground=t["fg"],
                            bd=0, highlightthickness=0, cursor="hand2",
                            anchor="w").pack(fill="x")
+        legend = tk.Label(foot, text="What do they react to?", font=self.f_ui,
+                          bg=t["bg"], fg=t["accent"], cursor="hand2",
+                          anchor="w")
+        legend.pack(fill="x", pady=(2, 0))
+        legend.bind("<Button-1>", lambda e: self.show_legend())
         tk.Button(foot, text="Quit", font=self.f_ui, bd=0, relief="flat",
                   cursor="hand2", padx=10, bg=t["bg"], fg=t["dim"],
                   activebackground=t["hover"], activeforeground=t["fg"],
                   command=self.app.quit_app).pack(anchor="e", pady=(6, 0))
+
+    def show_legend(self):
+        from tkinter import messagebox
+        messagebox.showinfo("What do they react to?", legend_text(), parent=self)
 
     def _menu_capture(self):
         """Windows may refuse the combination. If it does, the box goes back

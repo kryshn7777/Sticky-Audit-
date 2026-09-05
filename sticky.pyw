@@ -43,6 +43,31 @@ NAG_EVERY_MS = 210000
 NAG_CHANCE = 0.25
 NAG_COOLDOWN_S = 900
 
+# The first ten minutes run the crew fast. Everything they do on their own is
+# on a clock measured in minutes, which is right for a machine you leave on all
+# day and useless to somebody who has just installed this and is watching: the
+# whole point of the app happens off-screen while they decide it does nothing.
+SHOWTIME_MS = 600000
+SHOWTIME_HASTE = 0.15
+
+# The three notes a brand new desk opens with. Between them they say what the
+# app is: he reads the words, here is a list to try things from, and a note
+# whose mood he has already taken on. No trigger word appears in the text of
+# the note that asks for one - a man reads his own note as he is born, and
+# would count the word as already used and never go.
+STARTER_NOTES = (
+    ("yellow", "He reads your notes",
+     "A little guy lives on every note and reads what you write.\n\n"
+     "Type the name of his favourite cheesy round food and watch him go\n"
+     "and get one."),
+    ("green", "Things to try",
+     "[ ] right-click me and open Scenes\n"
+     "[ ] find \"What do they react to?\" on the board\n"
+     "[ ] tick every box on this note"),
+    ("blue", "So sleepy",
+     "yawn... nap time... zzz"),
+)
+
 
 class App:
     def __init__(self):
@@ -83,17 +108,27 @@ class App:
         for note in self.store.notes:
             self._open(note)
 
+        # said_hello is only written a few seconds from now, so it still says
+        # whether this is the first time the app has ever been opened.
+        first_run = not self.store.settings.get("said_hello")
+
         if not self.store.notes:
             # An empty desk looks like the app failed to start, and a sticky
             # note app with nothing on screen has nothing to offer. Trash is
             # not a note: having thrown one away is no reason to open to
             # nothing the next morning.
-            self.new_note()
+            if first_run and not self.store.trash:
+                self._starter_notes()
+            else:
+                self.new_note()
         self.board.show()
         self._schedule_nag()
         self._hello_job = None
-        if not self.store.settings.get("said_hello"):
+        self._show_job = None
+        if first_run:
             self._hello_job = self.root.after(HELLO_MS, self._hello)
+            roamer.HASTE = SHOWTIME_HASTE
+            self._show_job = self.root.after(SHOWTIME_MS, self._end_showtime)
 
         atexit.register(self._save_quietly)
 
@@ -111,6 +146,26 @@ class App:
         window = NoteWindow(self, note)
         self.windows[note["id"]] = window
         return window
+
+    def _starter_notes(self):
+        """The desk a brand new user opens to. Written once, ever.
+
+        Through store.add rather than new_note: three notes each grabbing the
+        cursor is three notes fighting over it, and the first one wants to be
+        read rather than typed into.
+        """
+        for color, heading, body in STARTER_NOTES:
+            note = self.store.add(color)
+            note["heading"] = heading
+            note["body"] = body
+            note["topmost"] = self.store.settings["always_on_top"]
+            self._open(note)
+        self.store.save()
+
+    def _end_showtime(self):
+        """Ten minutes up: the crew goes back to normal time."""
+        self._show_job = None
+        roamer.HASTE = 1.0
 
     def new_note(self, color=store.DEFAULT_COLOR, at=None):
         note = self.store.add(color, *(at if at is not None else (None, None)))
@@ -309,7 +364,7 @@ class App:
 
     def _cancel_jobs(self):
         """Every after() this app owns, called off."""
-        for name in ("_nag_job", "_hello_job"):
+        for name in ("_nag_job", "_hello_job", "_show_job"):
             job = getattr(self, name, None)
             if job is None:
                 continue

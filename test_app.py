@@ -50,6 +50,7 @@ def _load_entrypoint():
 
 
 app_module = _load_entrypoint()
+import board as board_mod  # noqa: E402
 import roamer  # noqa: E402
 import store  # noqa: E402
 import yard  # noqa: E402
@@ -168,13 +169,62 @@ def main():
     assert app.set_quick_capture(True) is True, "and on again is on"
     print("ok  Ctrl+Alt+N drops a note where the pointer is")
 
-    # --- first run hands the user a blank note, already in edit mode ----------
+    # --- first run hands the user a desk that shows what the app does ---------
+    # Three notes, not one: a stranger who sees an empty sheet never finds out
+    # that anybody reads it.
+    assert len(app.store.notes) == 3, app.store.notes
+    starters = {n["heading"]: n for n in app.store.notes}
+    assert set(starters) == {"He reads your notes", "Things to try",
+                             "So sleepy"}, sorted(starters)
+    # The note that asks for a pizza must not contain the word. He reads his
+    # own note as he is born and would count it as already ordered, so the
+    # first thing a new user is told to try would do nothing at all.
+    ask = starters["He reads your notes"]
+    words = ("%s %s" % (ask["heading"], ask["body"])).lower()
+    for word in roamer.PIZZA_WORDS + roamer.BDAY_WORDS:
+        assert word not in words, ("a one-shot word in the note that asks for "
+                                   "it is a one-shot already spent", word)
+    assert app_module.mascot.has_open_box(starters["Things to try"]["body"]), \
+        "the list has to have something left to tick"
+    assert roamer.temper_of(starters["So sleepy"]["body"]) == "sleepy", \
+        "and the sleepy note has to actually make a sleepy man"
+    print("ok  first run opens a desk that introduces the crew")
+
+    # --- the first ten minutes run the crew fast ------------------------------
+    # Everything they do on their own is on a clock measured in minutes, which
+    # is nothing to watch on the day you install it.
+    assert roamer.HASTE == app_module.SHOWTIME_HASTE, "a first run hurries them"
+    assert app._show_job is not None, "and has an end to it pending"
+    far = roamer._time() + 9999.0
+    roamer._pounce_at = 1.0             # long due, so the next look fires
+    fired = roamer._due("_pounce_at", roamer.POUNCE_EVERY, far)
+    assert fired, "a clock this far past due has to fire"
+    assert roamer._pounce_at - far <= roamer.POUNCE_EVERY[1] * roamer.HASTE, \
+        ("and be wound by the haste, not the full wait",
+         roamer._pounce_at - far)
+    app.root.after_cancel(app._show_job)
+    app._end_showtime()
+    assert roamer.HASTE == 1.0, "then normal time, for good"
+    assert app._show_job is None
+    roamer._pounce_at = 0.0
+    print("ok  a first run hurries the fun along, then stops")
+
+    # Back to one blank note: everything below was written against a desk with
+    # a single sheet on it, and the starter notes have said their piece.
+    for note in list(app.store.notes):
+        app.trash_note(note["id"])
+        app.store.purge(note["id"])
+    if app.toast is not None:
+        app.toast.close()
+        app.toast = None
+    app.store.save()
+    window = app.new_note()
+    note_id = window.note["id"]
+    pump(app.root)
     assert len(app.store.notes) == 1, app.store.notes
-    note_id = app.store.notes[0]["id"]
-    window = app.windows[note_id]
     assert window.editing, "a brand new note should be ready to write in"
     assert window.toolbar.winfo_ismapped(), "edit mode must show the OK / Trash toolbar"
-    print("ok  first run opens one editable note")
+    print("ok  a new note opens ready to write in")
 
     # --- typing autosaves without anyone pressing OK --------------------------
     type_into(app, window, window.head, "Groceries")
@@ -922,6 +972,18 @@ def main():
     assert len(board.list.winfo_children()) == rows_before, (
         "with everything back", len(board.list.winfo_children()), rows_before)
     print("ok  the overview finds a note by what is written on it")
+
+    # --- the words they react to are written down somewhere -------------------
+    # Built from the crew's own lists rather than typed out again, so the day
+    # somebody adds a word the page says so.
+    legend = board_mod.legend_text()
+    for word in roamer.PIZZA_WORDS[:1] + roamer.BDAY_WORDS[:1]:
+        assert word in legend, ("a trigger word missing from the legend", word)
+    for mood, words in roamer.TEMPER_WORDS.items():
+        assert mood.upper() in legend, ("a mood nobody is told about", mood)
+        assert words[0] in legend, ("and no word to type for it", mood)
+    assert "[ ]" in legend, "the boxes are a trigger too"
+    print("ok  the board says what they react to")
 
     # --- closing the overview must not take the notes with it -----------------
     app.board.hide()
@@ -1741,6 +1803,45 @@ def main():
             guy._begin("rest", roamer._time())
             guy.vanish()
         print("ok  an angry note mostly turns the fun down")
+
+        # The same scenes, asked for off the menu rather than waited on. A
+        # stranger who saw a clip of the pizza wants the pizza now, not the
+        # odds of one - and the menu must not touch the once-per-note latch
+        # the typed word uses, or asking twice would be asking once.
+        asker = roamer.Roamer(app, window, left + 400.0, floor)
+        mate = roamer.Roamer(app, second, left + 470.0, floor)
+        for guy in (asker, mate):
+            guy.floor, guy.y = floor, floor
+            guy.vx = guy.vy = 0.0
+            guy._begin("rest", roamer._time())
+        assert window._scenes_index is not None, "the menu has a Scenes cascade"
+        window._scene_pizza()
+        assert asker.state == "errand", ("asked for, he goes",
+                                         asker.state)
+        assert not asker._pizza_done, (
+            "and the menu does not spend the note's one-shot")
+        asker._begin("rest", roamer._time())
+        window._scene_party()
+        assert asker._hat_until > roamer._time(), "a party on demand is hats"
+        asker._begin("rest", roamer._time())
+        mate._begin("rest", roamer._time())
+        for guy in (asker, mate):
+            guy._hat_until = 0.0
+        assert roamer.yard.van() is None, "no van yet"
+        assert window._scene_icecream(), "two men stood about is a round"
+        assert roamer.yard.van() is not None, "and the van comes"
+        assert not window._scene_icecream(), "one van at a time"
+        roamer.yard.send_off()
+        crank(4)
+        # Switched off, there is nobody to ask. The cascade goes grey rather
+        # than firing into an empty crew.
+        window._sync_menu()
+        assert str(window.menu.entrycget(window._scenes_index, "state")) == \
+            "normal", "with him on the note, the scenes are there to ask for"
+        for guy in (asker, mate):
+            guy._begin("rest", roamer._time())
+            guy.vanish()
+        print("ok  the scenes can be asked for off the menu")
 
         # A pizza on the note is an errand and then a picnic: off the edge,
         # back with the box, and everybody near enough sits down to a slice.
