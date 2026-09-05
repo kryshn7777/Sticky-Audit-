@@ -1,0 +1,29 @@
+# PyInstaller version resource. Keep the four-part number in step with
+# package.ps1's -Version: the Store compares its own field against the MSIX
+# manifest, but Properties > Details on Sticky.exe shows this one.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'Sticky'),
+        StringStruct('FileDescription', 'Sticky - notes on your desktop'),
+        StringStruct('FileVersion', '1.0.0.0'),
+        StringStruct('InternalName', 'Sticky'),
+        StringStruct('OriginalFilename', 'Sticky.exe'),
+        StringStruct('ProductName', 'Sticky'),
+        StringStruct('ProductVersion', '1.0.0.0')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
