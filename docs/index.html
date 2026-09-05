@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sticky</title>
+<meta name="description" content="A free Windows desktop app: real sticky notes and a crew of little box-men on your taskbar who read what you write and act on it.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23FFD866'/%3E%3Ccircle cx='35' cy='45' r='6' fill='%235C4C1E'/%3E%3Ccircle cx='65' cy='45' r='6' fill='%235C4C1E'/%3E%3Cpath d='M36 66 Q50 78 64 66' stroke='%235C4C1E' stroke-width='7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  /* ---------- tokens ---------- */
+  :root{
+    --ground:#F5F5F3;
+    --ink:#1F1A0E;
+    --dim:#6B6B6B;
+
+    --yellow:#FFD866;
+    --yellow-edge:#E8BD4A;
+    --yellow-fold:#F7E8B2;
+
+    --green:#C7F0BD;
+    --green-edge:#A6DE99;
+    --green-ink:#1F3A18;
+
+    --pink:#F5C4D4;
+    --pink-edge:#E5A2B9;
+    --pink-ink:#451E2C;
+
+    --purple:#D0BCF3;
+    --purple-edge:#B49FE0;
+    --purple-ink:#2E1F4D;
+
+    --blue:#B4E5FA;
+    --blue-edge:#8ACDEC;
+    --blue-ink:#14323F;
+
+    --outline:#5C4C1E;
+    --limb:#6E5C28;
+
+    --taskbar-h:56px;
+    --maxw:1100px;
+    --pad:24px;
+    --gap-desktop:120px;
+    --gap-mobile:72px;
+
+    --font-display:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --font-body:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,'Cascadia Code',Consolas,monospace;
+
+    color-scheme: light;
+  }
+
+  /* ---------- reset ---------- */
+  *,*::before,*::after{ box-sizing:border-box; }
+  html{ scroll-behavior:auto; }
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:17px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    padding-bottom:var(--taskbar-h);
+  }
+  h1,h2,h3,p,ul,li,figure{ margin:0; }
+  ul{ padding:0; list-style:none; }
+  a{ color:inherit; }
+  button{ font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+  canvas{ display:block; }
+
+  .visually-hidden{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+
+  a.skip-link{
+    position:absolute; left:8px; top:-48px; background:var(--ink); color:var(--ground);
+    padding:10px 16px; border-radius:4px; z-index:200; transition:top .15s ease;
+    font-family:var(--font-mono); font-size:14px;
+  }
+  a.skip-link:focus{ top:8px; }
+
+  :focus-visible{ outline:3px solid var(--ink); outline-offset:3px; }
+
+  /* ---------- type ---------- */
+  h1{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:clamp(2.5rem, 1.5rem + 4vw, 4.5rem);
+    line-height:1.04;
+    letter-spacing:-0.02em;
+    text-wrap:balance;
+  }
+  h2{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:clamp(1.9rem, 1.4rem + 2.2vw, 2.75rem);
+    line-height:1.1;
+    letter-spacing:-0.02em;
+    text-wrap:balance;
+  }
+  h3{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:1.375rem;
+    letter-spacing:-0.01em;
+  }
+  .lead{
+    font-size:18px;
+    line-height:1.55;
+    max-width:65ch;
+    color:var(--ink);
+  }
+  .label{
+    font-family:var(--font-mono);
+    font-weight:500;
+    font-size:15px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--dim);
+  }
+  .mono{ font-family:var(--font-mono); }
+
+  /* ---------- layout ---------- */
+  .wrap{
+    max-width:var(--maxw);
+    margin:0 auto;
+    padding:0 var(--pad);
+  }
+  main > section{
+    margin-top:var(--gap-mobile);
+  }
+  main > section:first-child{ margin-top:64px; }
+  @media (min-width:800px){
+    main > section{ margin-top:var(--gap-desktop); }
+    main > section:first-child{ margin-top:88px; }
+  }
+  main > section + section{
+    border-top:1px solid rgba(31,26,14,0.1);
+    padding-top:var(--gap-mobile);
+  }
+  @media (min-width:800px){
+    main > section + section{ padding-top:var(--gap-desktop); }
+  }
+
+  /* ---------- header ---------- */
+  header.site{
+    padding:20px var(--pad) 0;
+    max-width:var(--maxw);
+    margin:0 auto;
+  }
+  .wordmark{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:19px;
+    letter-spacing:-0.01em;
+    text-decoration:none;
+  }
+
+  /* ---------- hero ---------- */
+  .hero{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:48px;
+    align-items:center;
+  }
+  @media (min-width:860px){
+    .hero{ grid-template-columns:7fr 5fr; gap:56px; }
+  }
+  .hero-copy .label{ display:block; margin-bottom:18px; }
+  .hero-copy h1{ margin-bottom:22px; }
+  .hero-copy .lead{ margin-bottom:32px; }
+
+  .hero-art{
+    display:flex;
+    justify-content:center;
+  }
+  @media (min-width:860px){
+    .hero-art{ justify-content:flex-end; }
+  }
+
+  /* the demo note */
+  .note{
+    background:var(--yellow);
+    position:relative;
+    box-shadow:0 22px 40px -18px rgba(31,26,14,0.45), 0 4px 10px rgba(31,26,14,0.12);
+    padding:22px 22px 18px;
+  }
+  .note::after{
+    content:"";
+    position:absolute;
+    right:0; bottom:0;
+    width:26px; height:26px;
+    background:linear-gradient(135deg, transparent 50%, rgba(31,26,14,0.12) 50.5%, var(--yellow-fold) 51%);
+  }
+  .note-demo{
+    width:292px;
+    max-width:100%;
+    min-height:272px;
+    transform:rotate(-2deg);
+    display:flex;
+    flex-direction:column;
+  }
+  .note-demo .note-heading{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:22px;
+    letter-spacing:-0.01em;
+    margin-bottom:10px;
+    border-bottom:2px solid var(--yellow-edge);
+    padding-bottom:8px;
+  }
+  .note-demo label{
+    display:block;
+    font-family:var(--font-mono);
+    font-size:13px;
+    color:#6b5a12;
+    margin-bottom:6px;
+  }
+  .note-demo textarea{
+    flex:1;
+    width:100%;
+    resize:none;
+    border:0;
+    background:transparent;
+    font-family:var(--font-body);
+    font-weight:500;
+    font-size:17px;
+    line-height:1.45;
+    color:#3a2f0a;
+    min-height:110px;
+  }
+  .note-demo textarea::placeholder{ color:rgba(58,47,10,0.55); }
+  .note-demo textarea:focus-visible{ outline:2px solid var(--outline); outline-offset:4px; }
+
+  .chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:14px;
+  }
+  .chip{
+    font-family:var(--font-mono);
+    font-size:14px;
+    padding:6px 12px;
+    background:rgba(255,255,255,0.55);
+    border:1.5px solid var(--outline);
+    border-radius:20px;
+    color:#3a2f0a;
+  }
+  .chip:hover{ background:#fff; }
+  .chip:active{ transform:translateY(1px); }
+
+  /* buttons */
+  .actions{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:20px;
+    margin-top:8px;
+  }
+  .btn-primary{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    background:var(--yellow);
+    border:2px solid var(--outline);
+    color:var(--ink);
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:16px;
+    padding:14px 22px;
+    border-radius:6px;
+    text-decoration:none;
+    box-shadow:0 4px 0 var(--outline);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .btn-primary:hover{ transform:translateY(2px); box-shadow:0 2px 0 var(--outline); }
+  .btn-primary:active{ transform:translateY(4px); box-shadow:0 0 0 var(--outline); }
+  .btn-secondary{
+    font-family:var(--font-mono);
+    font-size:15px;
+    text-decoration:underline;
+    text-underline-offset:3px;
+    color:var(--ink);
+  }
+  .fine-print{
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--dim);
+    margin-top:16px;
+  }
+
+  /* ---------- scenes ---------- */
+  .section-head{ margin-bottom:40px; max-width:65ch; }
+  .section-head .label{ margin-bottom:14px; }
+
+  .scene-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:32px;
+  }
+  @media (min-width:640px){
+    .scene-grid{ grid-template-columns:1fr 1fr; }
+  }
+  @media (min-width:980px){
+    .scene-grid{ grid-template-columns:repeat(3, 1fr); }
+  }
+  .scene-card{
+    padding:16px 16px 18px;
+    position:relative;
+    box-shadow:0 14px 26px -16px rgba(31,26,14,0.35), 0 3px 8px rgba(31,26,14,0.1);
+  }
+  .scene-card::after{
+    content:"";
+    position:absolute;
+    right:0; bottom:0;
+    width:20px; height:20px;
+    background:linear-gradient(135deg, transparent 50%, rgba(31,26,14,0.12) 50.5%, rgba(255,255,255,0.6) 51%);
+  }
+  .scene-card h3{ margin-bottom:10px; }
+  .scene-card canvas{
+    width:100%;
+    height:auto;
+    aspect-ratio:300/120;
+    border-radius:2px;
+  }
+  .scene-card p{
+    font-size:15px;
+    margin-top:10px;
+    color:inherit;
+    opacity:0.85;
+  }
+  .scene-card[data-color="blue"]{ background:var(--blue); color:var(--blue-ink); }
+  .scene-card[data-color="yellow"]{ background:var(--yellow); color:#3a2f0a; }
+  .scene-card[data-color="pink"]{ background:var(--pink); color:var(--pink-ink); }
+  .scene-card[data-color="purple"]{ background:var(--purple); color:var(--purple-ink); }
+  .scene-card[data-color="green"]{ background:var(--green); color:var(--green-ink); }
+
+  /* ---------- checklist / difference note ---------- */
+  .checklist-note{
+    background:var(--yellow);
+    box-shadow:0 22px 44px -20px rgba(31,26,14,0.4), 0 4px 10px rgba(31,26,14,0.1);
+    padding:36px clamp(20px,4vw,48px) 40px;
+    max-width:760px;
+    position:relative;
+  }
+  .checklist-note::after{
+    content:"";
+    position:absolute;
+    right:0; bottom:0;
+    width:30px; height:30px;
+    background:linear-gradient(135deg, transparent 50%, rgba(31,26,14,0.12) 50.5%, var(--yellow-fold) 51%);
+  }
+  .checklist-note h2{ color:#3a2f0a; margin-bottom:24px; }
+  .checklist{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .checklist li{
+    display:flex;
+    gap:12px;
+    align-items:baseline;
+    font-size:17px;
+    color:#3a2f0a;
+  }
+  .check-box{
+    font-family:var(--font-mono);
+    font-weight:500;
+    font-size:16px;
+    flex:none;
+    color:var(--outline);
+  }
+  .check-box.done{ color:#1F3A18; }
+
+  /* ---------- honest bits ---------- */
+  .honest .label{ margin-bottom:14px; }
+  .honest p{ max-width:65ch; font-size:17px; }
+  .honest code{
+    font-family:var(--font-mono);
+    background:rgba(31,26,14,0.08);
+    padding:1px 6px;
+    border-radius:3px;
+    font-size:15px;
+  }
+
+  /* ---------- footer ---------- */
+  footer.site{
+    max-width:var(--maxw);
+    margin:0 auto;
+    padding:56px var(--pad) 48px;
+    font-family:var(--font-mono);
+    font-size:14px;
+    color:var(--dim);
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px 16px;
+    align-items:center;
+  }
+  footer.site a{ color:var(--ink); text-decoration:underline; text-underline-offset:2px; }
+
+  /* ---------- taskbar canvas ---------- */
+  #taskbar{
+    position:fixed;
+    left:0; bottom:0;
+    width:100%;
+    height:var(--taskbar-h);
+    z-index:50;
+    pointer-events:none;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    html{ scroll-behavior:auto; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site">
+  <a class="wordmark" href="#main">Sticky</a>
+</header>
+
+<main id="main">
+
+  <section class="hero wrap" aria-labelledby="hero-heading">
+    <div class="hero-copy">
+      <span class="label">Free for Windows</span>
+      <h1 id="hero-heading" class="reveal-lines">Notes that read you back.</h1>
+      <p class="lead">Sticky puts real sticky notes on your desktop and a crew of little box-men on your taskbar. They read what you write. Then they act on it.</p>
+      <div class="actions">
+        <!-- TODO: swap to the itch.io page once it exists -->
+        <a class="btn-primary" href="https://github.com/kryshn7777/Sticky-Audit-">Download for Windows &mdash; free</a>
+        <a class="btn-secondary" href="https://github.com/kryshn7777/Sticky-Audit-">Source on GitHub</a>
+      </div>
+      <p class="fine-print">12 MB. No account. No servers. Works offline.</p>
+    </div>
+
+    <div class="hero-art">
+      <div class="note note-demo">
+        <div class="note-heading">Try me</div>
+        <label for="demo-input">Type a word for the crew to react to</label>
+        <textarea id="demo-input" placeholder="Type here. Try pizza, birthday, zzz, grr." maxlength="240"></textarea>
+        <div class="chips" role="group" aria-label="Try a word">
+          <button type="button" class="chip" data-word="pizza">pizza</button>
+          <button type="button" class="chip" data-word="birthday">birthday</button>
+          <button type="button" class="chip" data-word="zzz">zzz</button>
+          <button type="button" class="chip" data-word="grr">grr</button>
+          <button type="button" class="chip" data-word="yay">yay</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="scenes-heading">
+    <div class="section-head">
+      <span class="label">What they get up to</span>
+      <h2 id="scenes-heading">They have a life down there.</h2>
+    </div>
+    <div class="scene-grid">
+      <article class="scene-card" data-color="blue">
+        <h3>Race day</h3>
+        <canvas class="vignette" data-scene="race" width="300" height="120" role="img" aria-label="Three box-men race across the taskbar and one of them trips"></canvas>
+        <p>Three of them line up, and one of them trips.</p>
+      </article>
+      <article class="scene-card" data-color="yellow">
+        <h3>Pizza run</h3>
+        <canvas class="vignette" data-scene="pizza" width="300" height="120" role="img" aria-label="A box-man runs off and returns with a pizza box for everyone"></canvas>
+        <p>Write pizza. He goes and gets one. Everybody sits down.</p>
+      </article>
+      <article class="scene-card" data-color="pink">
+        <h3>Ice cream van</h3>
+        <canvas class="vignette" data-scene="icecream" width="300" height="120" role="img" aria-label="An ice cream van pulls up and two box-men queue for a cone"></canvas>
+        <p>It comes round more often on happy notes.</p>
+      </article>
+      <article class="scene-card" data-color="purple">
+        <h3>Nap pile</h3>
+        <canvas class="vignette" data-scene="nap" width="300" height="120" role="img" aria-label="Two sleepy box-men lie down together in a pile"></canvas>
+        <p>Two sleepy notes, one heap.</p>
+      </article>
+      <article class="scene-card" data-color="green">
+        <h3>Birthday</h3>
+        <canvas class="vignette" data-scene="birthday" width="300" height="120" role="img" aria-label="Box-men wear party hats and bounce while one sings"></canvas>
+        <p>Hats. A song. Once per note.</p>
+      </article>
+      <article class="scene-card" data-color="pink">
+        <h3>Ambulance</h3>
+        <canvas class="vignette" data-scene="ambulance" width="300" height="120" role="img" aria-label="A fallen box-man is loaded into an ambulance and driven off"></canvas>
+        <p>Somebody always falls over.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="different-heading">
+    <div class="section-head">
+      <span class="label">How it is different</span>
+      <h2 id="different-heading">A note is not a menu.</h2>
+    </div>
+    <div class="checklist-note">
+      <ul class="checklist" id="checklist">
+        <li><span class="check-box" data-box>[ ]</span><span>They read the note. Write &ldquo;pizza&rdquo; and somebody goes to fetch one.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>They live on the taskbar, between your windows, not inside an app.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>Real windows on coloured paper, still there after a reboot.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>12 MB, near-zero CPU. No account, no telemetry, nothing phones home.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>Ctrl+Alt+N drops a note where your pointer is.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>Right-click a note, open Scenes, and ask for the pizza now.</span></li>
+        <li><span class="check-box" data-box>[ ]</span><span>An angry note makes a grumpy man. He says &ldquo;hmph&rdquo;.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="wrap honest" aria-labelledby="honest-heading">
+    <span class="label">Honest bits</span>
+    <h2 id="honest-heading" class="visually-hidden">Honest bits</h2>
+    <p>Made by one person. This build is not code-signed yet, so Windows SmartScreen will warn you the first time &mdash; click More info, then Run anyway. A Microsoft Store version is on the way. Your notes live in <code>%APPDATA%\StickyNote</code> and nowhere else.</p>
+  </section>
+
+</main>
+
+<footer class="site">
+  <span>Sticky. Free for Windows.</span>
+  <a href="https://github.com/kryshn7777/Sticky-Audit-">Source on GitHub</a>
+</footer>
+
+<canvas id="taskbar" aria-hidden="true"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" integrity="sha384-g4NTh/Iv5PPU4xPyhEWqPcwtNXOvdaDI8LLnyYfyNZOjKJeYQyjzQ9X5275eBjpt" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js" integrity="sha384-Z3REaz79l2IaAZqJsSABtTbhjgOUYyV3p90XNnAPCSHg3EMTz1fouunq9WZRtj3d" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.min.js" integrity="sha384-tKsJDT6PlUI0pSBt9/sBKJluKgA19/a6mBrDsZaXotLB4ZYfMGM6xt6/WgGpYhTm" crossorigin="anonymous"></script>
+<script>
+(function(){
+  "use strict";
+
+  var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* =====================================================================
+     Smooth scroll + GSAP wiring
+     ===================================================================== */
+  if (window.gsap && window.ScrollTrigger){ gsap.registerPlugin(ScrollTrigger); }
+
+  if (!REDUCED && window.Lenis){
+    var lenis = new Lenis();
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add(function(t){ lenis.raf(t * 1000); });
+    gsap.ticker.lagSmoothing(0);
+  }
+
+  /* =====================================================================
+     Load-in: headline lines rise, scene cards settle, checklist ticks
+     ===================================================================== */
+  function splitHeadline(el){
+    var text = el.textContent.trim();
+    var words = text.split(' ');
+    el.textContent = '';
+    var lines = [];
+    words.forEach(function(w, i){
+      var span = document.createElement('span');
+      span.textContent = w + (i < words.length - 1 ? ' ' : '');
+      span.style.display = 'inline-block';
+      el.appendChild(span);
+      lines.push(span);
+    });
+    return lines;
+  }
+
+  window.addEventListener('DOMContentLoaded', function(){
+    var headline = document.getElementById('hero-heading');
+    if (window.gsap && headline){
+      var lines = splitHeadline(headline);
+      if (REDUCED){
+        gsap.set(lines, { y:0, opacity:1 });
+      } else {
+        gsap.from(lines, { y:28, duration:0.7, stagger:0.08, ease:'power3.out' });
+      }
+    }
+    startCrewEntrance();
+  });
+
+  if (window.gsap && window.ScrollTrigger){
+    document.querySelectorAll('.scene-card').forEach(function(card, i){
+      var tilt = (i % 2 === 0) ? -1.4 : 1.6;
+      card.style.transform = 'rotate(' + tilt + 'deg)';
+      if (REDUCED) return;
+      gsap.from(card, {
+        y: 22,
+        rotate: tilt + (i % 2 === 0 ? -3 : 3),
+        duration: 0.8,
+        ease: 'power2.out',
+        scrollTrigger: { trigger: card, start: 'top 88%', once: true }
+      });
+    });
+
+    var boxes = document.querySelectorAll('#checklist .check-box');
+    ScrollTrigger.create({
+      trigger: '#checklist',
+      start: 'top 80%',
+      once: true,
+      onEnter: function(){
+        boxes.forEach(function(box, i){
+          if (REDUCED){
+            box.textContent = '[x]';
+            box.classList.add('done');
+            return;
+          }
+          gsap.delayedCall(i * 0.16, function(){
+            box.textContent = '[x]';
+            box.classList.add('done');
+            gsap.fromTo(box, { scale:1.4 }, { scale:1, duration:0.3, ease:'back.out(3)' });
+          });
+        });
+      }
+    });
+  } else {
+    document.querySelectorAll('#checklist .check-box').forEach(function(box){
+      box.textContent = '[x]';
+      box.classList.add('done');
+    });
+  }
+
+  /* =====================================================================
+     Crew engine — shared box-man drawing + taskbar simulation + vignettes
+     ===================================================================== */
+  var OUTLINE = '#5C4C1E';
+  var LIMB = '#6E5C28';
+
+  var PAPER = {
+    yellow: { fill:'#FFD866', edge:'#E8BD4A' },
+    green:  { fill:'#C7F0BD', edge:'#A6DE99' },
+    blue:   { fill:'#B4E5FA', edge:'#8ACDEC' }
+  };
+
+  // ---- shared figure renderer -------------------------------------------
+  // o: x,y (ground/feet center), scale, facing(1|-1), paper, edge,
+  //    walk (radians, 0 = idle stance), brows, mouth, look(-1|0|1), blink,
+  //    lying, sitting, carrying, hat, bubble, zzz
+  function drawBoxMan(ctx, o){
+    var s = o.scale || 1;
+    var facing = o.facing || 1;
+    var head = 26 * s;
+    var legLen = 15 * s;
+    var armLen = 15 * s;
+
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    if (o.lying){
+      ctx.rotate(facing >= 0 ? -Math.PI/2 : Math.PI/2);
+      ctx.translate(0, legLen + head/2);
+    }
+
+    var walk = o.walk || 0;
+    var bob = o.walk ? Math.abs(Math.sin(walk)) * 1.2 * s : 0;
+    var hop = o.hop || 0;
+    var hipY = -legLen - hop;
+    var headCy = hipY - head/2 - bob;
+
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(1.5, 2 * s);
+    ctx.strokeStyle = LIMB;
+
+    // legs
+    if (o.sitting){
+      [-1,1].forEach(function(side){
+        ctx.beginPath();
+        ctx.moveTo(side * 6 * s, hipY);
+        ctx.lineTo(side * 16 * s, hipY + 9 * s);
+        ctx.stroke();
+        drawShoe(ctx, side * 18 * s, hipY + 9 * s, side, s);
+      });
+    } else {
+      var stride = o.walk ? Math.sin(walk) * 6 * s : 0;
+      [-1,1].forEach(function(side, idx){
+        var swing = idx === 0 ? stride : -stride;
+        ctx.beginPath();
+        ctx.moveTo(side * 6 * s, hipY);
+        ctx.lineTo(side * 6 * s + swing, hipY + legLen);
+        ctx.stroke();
+        drawShoe(ctx, side * 6 * s + swing, hipY + legLen, side, s);
+      });
+    }
+
+    // arms
+    if (o.carrying){
+      ctx.beginPath();
+      ctx.moveTo(-8 * s, headCy + head*0.15);
+      ctx.lineTo(-9 * s, headCy + head*0.55);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(8 * s, headCy + head*0.15);
+      ctx.lineTo(9 * s, headCy + head*0.55);
+      ctx.stroke();
+      drawHand(ctx, -9*s, headCy + head*0.55, s);
+      drawHand(ctx, 9*s, headCy + head*0.55, s);
+      drawBox(ctx, 0, headCy + head*0.62, s, false);
+    } else {
+      var armSwing = o.walk ? Math.sin(walk + Math.PI) * 10 * s : 0;
+      [-1,1].forEach(function(side, idx){
+        var sw = idx === 0 ? armSwing : -armSwing;
+        var ex = side * 13 * s + sw*0.4;
+        var ey = headCy + head*0.62 + Math.abs(sw)*0.15;
+        ctx.beginPath();
+        ctx.moveTo(side * 6 * s, headCy + head*0.6);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        drawHand(ctx, ex, ey, s);
+      });
+    }
+
+    // head
+    ctx.fillStyle = o.paper;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 2 * s;
+    roundRect(ctx, -head/2, headCy - head/2, head, head, 6*s);
+    ctx.fill();
+    ctx.stroke();
+
+    // face
+    var lookX = (o.look || 0) * 2.6 * s;
+    ctx.fillStyle = OUTLINE;
+    if (o.blink){
+      ctx.lineWidth = 1.6*s;
+      ctx.strokeStyle = OUTLINE;
+      [-1,1].forEach(function(side){
+        ctx.beginPath();
+        ctx.moveTo(side*8*s - 2.4*s, headCy - 1*s);
+        ctx.lineTo(side*8*s + 2.4*s, headCy - 1*s);
+        ctx.stroke();
+      });
+    } else {
+      [-1,1].forEach(function(side){
+        ctx.beginPath();
+        ctx.arc(side*8*s + lookX, headCy - 1*s, 2.1*s, 0, Math.PI*2);
+        ctx.fill();
+      });
+    }
+
+    ctx.lineWidth = 1.6 * s;
+    ctx.strokeStyle = OUTLINE;
+    [-1,1].forEach(function(side){
+      ctx.beginPath();
+      var by = headCy - 7*s;
+      if (o.brows === 'angry'){
+        ctx.moveTo(side*11*s, by - 1.5*s);
+        ctx.lineTo(side*4*s, by + 2*s);
+      } else if (o.brows === 'happy'){
+        ctx.moveTo(side*4*s, by - 1*s);
+        ctx.quadraticCurveTo(side*8*s, by - 3*s, side*12*s, by);
+      } else {
+        ctx.moveTo(side*4*s, by);
+        ctx.lineTo(side*12*s, by);
+      }
+      ctx.stroke();
+    });
+
+    ctx.beginPath();
+    var my = headCy + 8*s;
+    if (o.mouth === 'smile'){
+      ctx.moveTo(-6*s, my);
+      ctx.quadraticCurveTo(0, my + 5*s, 6*s, my);
+    } else if (o.mouth === 'frown'){
+      ctx.moveTo(-5*s, my + 3*s);
+      ctx.quadraticCurveTo(0, my - 3*s, 5*s, my + 3*s);
+    } else {
+      ctx.moveTo(-4*s, my);
+      ctx.lineTo(4*s, my);
+    }
+    ctx.stroke();
+
+    // hat
+    if (o.hat){
+      ctx.fillStyle = '#F5C4D4';
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1.5*s;
+      ctx.beginPath();
+      ctx.moveTo(-9*s, headCy - head/2 + 1*s);
+      ctx.lineTo(9*s, headCy - head/2 + 1*s);
+      ctx.lineTo(0, headCy - head/2 - 15*s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(0, headCy - head/2 - 15*s, 2.6*s, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // zzz
+    if (o.zzz){
+      var t = o.zzzT || 0;
+      ctx.font = (9*s) + 'px ' + '"JetBrains Mono", monospace';
+      ctx.fillStyle = OUTLINE;
+      ctx.globalAlpha = 0.35 + 0.65 * (0.5 + 0.5*Math.sin(t*2));
+      ctx.fillText('z z z', 6*s, headCy - head/2 - 4*s - (t*4)%12);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    // speech bubble drawn in unrotated space, above wherever the head is
+    if (o.bubble){
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      var bw = ctx.measureText ? Math.max(30, o.bubble.length*6.2 + 14) : 44;
+      var bx = -bw/2, by = hipY - head - 26*s;
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1.4;
+      roundRect(ctx, bx, by, bw, 18, 5);
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-4,by+18); ctx.lineTo(4,by+18); ctx.lineTo(0,by+24);
+      ctx.closePath();
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = OUTLINE;
+      ctx.stroke();
+      ctx.fillStyle = OUTLINE;
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(o.bubble, 0, by+9);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  function drawHand(ctx,x,y,s){
+    ctx.fillStyle = OUTLINE;
+    ctx.beginPath();
+    ctx.arc(x,y,3*s,0,Math.PI*2);
+    ctx.fill();
+  }
+  function drawShoe(ctx,x,y,side,s){
+    ctx.fillStyle = OUTLINE;
+    ctx.beginPath();
+    ctx.ellipse(x + side*3*s, y, 6*s, 3*s, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+  function drawBox(ctx, cx, topY, s, open){
+    var w = 30*s, h = 14*s;
+    ctx.fillStyle = '#D9B98A';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5*s;
+    ctx.fillRect(cx - w/2, topY, w, h);
+    ctx.strokeRect(cx - w/2, topY, w, h);
+    if (open){
+      ctx.beginPath();
+      ctx.moveTo(cx - w/2, topY);
+      ctx.lineTo(cx - w/2 - 4*s, topY - 8*s);
+      ctx.lineTo(cx + w/2, topY);
+      ctx.closePath();
+      ctx.fillStyle = '#E6CBA0';
+      ctx.fill();
+      ctx.stroke();
+      // pizza
+      ctx.strokeStyle = '#C7752E';
+      ctx.fillStyle = '#F2C879';
+      ctx.beginPath();
+      ctx.arc(cx, topY - 1*s, 9*s, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#B23A2E';
+      [[-3,-2],[3,1],[0,4],[-4,3]].forEach(function(p){
+        ctx.beginPath();
+        ctx.arc(cx + p[0]*s, topY - 1*s + p[1]*s, 1.1*s, 0, Math.PI*2);
+        ctx.fill();
+      });
+    } else {
+      ctx.fillStyle = '#C7A06B';
+      ctx.fillRect(cx - w/2, topY - 3*s, w, 3*s);
+      ctx.strokeRect(cx - w/2, topY - 3*s, w, 3*s);
+    }
+  }
+  function drawVan(ctx, x, y, s, facing){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(facing,1);
+    ctx.fillStyle = '#F5C4D4';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5*s;
+    roundRect(ctx, -34*s, -26*s, 68*s, 26*s, 4*s);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#FBEFE3';
+    roundRect(ctx, -30*s, -22*s, 26*s, 14*s, 2*s);
+    ctx.fill(); ctx.stroke();
+    // cone on top
+    ctx.beginPath();
+    ctx.moveTo(18*s,-26*s); ctx.lineTo(24*s,-26*s); ctx.lineTo(21*s,-14*s);
+    ctx.closePath();
+    ctx.fillStyle = '#E8BD4A';
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(21*s,-30*s,5*s,0,Math.PI*2);
+    ctx.fillStyle = '#FFF6E0';
+    ctx.fill(); ctx.stroke();
+    [-20,4].forEach(function(wx){
+      ctx.beginPath();
+      ctx.arc(wx*s,0,5*s,0,Math.PI*2);
+      ctx.fillStyle = OUTLINE;
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+  function drawAmbulanceVan(ctx, x, y, s, facing){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(facing,1);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.5*s;
+    roundRect(ctx, -34*s, -26*s, 68*s, 26*s, 4*s);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#DCEFFB';
+    roundRect(ctx, -30*s, -22*s, 22*s, 14*s, 2*s);
+    ctx.fill(); ctx.stroke();
+    // red cross
+    ctx.fillStyle = '#C0392B';
+    ctx.fillRect(4*s, -18*s, 12*s, 4*s);
+    ctx.fillRect(8*s, -22*s, 4*s, 12*s);
+    [-20,4].forEach(function(wx){
+      ctx.beginPath();
+      ctx.arc(wx*s,0,5*s,0,Math.PI*2);
+      ctx.fillStyle = OUTLINE;
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  // ---- taskbar simulation -------------------------------------------------
+  var tbCanvas = document.getElementById('taskbar');
+  var tbCtx = tbCanvas.getContext('2d');
+  var tbW = 0, tbH = 0;
+
+  function sizeCanvas(canvas, ctx, cssW, cssH){
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  function resizeTaskbar(){
+    tbW = window.innerWidth;
+    tbH = tbCanvas.clientHeight || 56;
+    sizeCanvas(tbCanvas, tbCtx, tbW, tbH);
+  }
+  window.addEventListener('resize', resizeTaskbar);
+  resizeTaskbar();
+
+  function makeMan(id, startX){
+    return {
+      id: id,
+      paper: PAPER[id].fill,
+      edge: PAPER[id].edge,
+      x: startX,
+      facing: 1,
+      state: 'rest',
+      waitDelay: 0,
+      stateT: 0,
+      goalX: startX,
+      speed: 34,
+      phase: 0,
+      restT: 1 + Math.random()*2,
+      blinkT: 3 + Math.random()*3,
+      blinkOn: false,
+      blinkDur: 0,
+      lookT: 2 + Math.random()*3,
+      look: 0,
+      hopT: 2 + Math.random()*2,
+      hop: 0,
+      temper: 'neutral',
+      bubble: null,
+      bubbleT: 0,
+      carrying: false,
+      leftFromX: startX,
+      sitAlone: false
+    };
+  }
+
+  var men = [
+    makeMan('yellow', 0),
+    makeMan('green', 0),
+    makeMan('blue', 0)
+  ];
+  var crew = { state:'idle', t:0, siteX:0 };
+
+  function pickIdleGoal(m){
+    var margin = 30;
+    m.goalX = margin + Math.random() * Math.max(10, (tbW - margin*2));
+  }
+
+  function eligible(m){
+    return m.temper !== 'angry' && m.state !== 'sleep' && m.temper !== 'sad';
+  }
+
+  function showBubble(m, text){
+    m.bubble = text;
+    m.bubbleT = 1.5;
+  }
+
+  function triggerPizza(){
+    var yellow = men[0];
+    if (crew.state !== 'idle') return;
+    if (yellow.temper === 'angry'){ showBubble(yellow, 'hmph'); return; }
+    if (yellow.state === 'sleep') return;
+    crew.state = 'errand';
+    crew.t = 0;
+    yellow.leftFromX = yellow.x;
+    yellow.state = 'errand-out';
+    yellow.facing = 1;
+    yellow.speed = 90;
+  }
+
+  function triggerBirthday(){
+    if (crew.state !== 'idle') return;
+    crew.state = 'party';
+    crew.t = 0;
+    men.forEach(function(m){
+      if (eligible(m)) { m.state = 'party'; m.stateT = 0; }
+      else { showBubble(m, 'hmph'); }
+    });
+  }
+
+  function applyTemper(next){
+    var yellow = men[0];
+    var was = yellow.temper;
+    yellow.temper = next;
+    if (was !== next){
+      if (next === 'angry'){ showBubble(yellow, 'hmph'); }
+      if (next === 'sleepy'){
+        yellow.state = 'sleep'; yellow.stateT = 0;
+      } else if (was === 'sleepy' && yellow.state === 'sleep'){
+        yellow.state = 'rest'; yellow.stateT = 0; yellow.restT = 0.6;
+      }
+      if (next === 'sad'){
+        yellow.state = 'sad'; yellow.stateT = 0; yellow.goalX = 26;
+      } else if (was === 'sad' && yellow.state === 'sad'){
+        yellow.state = 'rest'; yellow.stateT = 0; yellow.restT = 0.6;
+      }
+    }
+  }
+
+  function updateMan(m, dt){
+    // idle facial timers
+    m.blinkT -= dt;
+    if (m.blinkT <= 0){
+      m.blinkOn = true; m.blinkDur = 0.12; m.blinkT = 3 + Math.random()*3;
+    }
+    if (m.blinkOn){ m.blinkDur -= dt; if (m.blinkDur <= 0) m.blinkOn = false; }
+    m.lookT -= dt;
+    if (m.lookT <= 0){ m.look = Math.round((Math.random()*2-1)); m.lookT = 2 + Math.random()*3; }
+    if (m.bubbleT > 0){ m.bubbleT -= dt; if (m.bubbleT <= 0) m.bubble = null; }
+
+    if (m.waitDelay > 0){ m.waitDelay -= dt; return; }
+
+    switch(m.state){
+      case 'rest':
+        m.restT -= dt;
+        if (m.temper === 'happy'){
+          m.hopT -= dt;
+          if (m.hopT <= 0){ m.hop = 4; m.hopT = 2 + Math.random()*2; }
+        }
+        if (m.hop > 0){ m.hop = Math.max(0, m.hop - dt*20); }
+        if (m.restT <= 0 && !REDUCED){
+          m.state = 'walk';
+          m.speed = 26 + Math.random()*14;
+          pickIdleGoal(m);
+        }
+        break;
+      case 'walk':
+        moveToward(m, dt);
+        m.phase += dt * (m.speed/10);
+        if (Math.abs(m.goalX - m.x) < 1){
+          m.state = 'rest';
+          m.restT = 2 + Math.random()*3;
+          m.phase = 0;
+        }
+        break;
+      case 'errand-out':
+        m.phase += dt * (m.speed/10);
+        m.x += m.speed * dt;
+        if (m.x > tbW + 24){
+          m.state = 'errand-off'; m.stateT = 0;
+        }
+        break;
+      case 'errand-off':
+        m.stateT += dt;
+        if (m.stateT >= 1.2){
+          m.carrying = true;
+          m.facing = -1;
+          m.x = tbW + 24;
+          m.state = 'errand-back';
+        }
+        break;
+      case 'errand-back':
+        m.phase += dt * (m.speed/10);
+        m.x -= m.speed * dt;
+        if (m.x <= m.leftFromX){
+          m.x = m.leftFromX;
+          gatherPicnic();
+        }
+        break;
+      case 'picnic':
+        m.stateT += dt;
+        m.phase += dt * 3;
+        break;
+      case 'party':
+        m.stateT += dt;
+        m.hop = 5 + Math.sin(m.stateT*8)*4;
+        break;
+      case 'sleep':
+        // stays put, lying, drawn via o.lying + zzz
+        break;
+      case 'sad':
+        moveToward(m, dt);
+        m.phase += dt * (m.speed/10);
+        if (Math.abs(m.goalX - m.x) < 1){ m.phase = 0; }
+        break;
+    }
+  }
+
+  function moveToward(m, dt){
+    var dx = m.goalX - m.x;
+    m.facing = dx >= 0 ? 1 : -1;
+    var step = m.speed * dt;
+    if (Math.abs(dx) <= step){ m.x = m.goalX; }
+    else { m.x += step * (dx > 0 ? 1 : -1); }
+  }
+
+  function gatherPicnic(){
+    // Two phases: gather (everyone hurries to the site, capped wait) then a
+    // fixed 8s eating clock. Without the cap a straggler far from the site
+    // could still be walking when the meal would otherwise end.
+    crew.state = 'gathering';
+    crew.t = 0;
+    crew.siteX = men[0].leftFromX;
+    men[0].state = 'picnic'; men[0].stateT = 0; men[0].phase = 0;
+    men.forEach(function(m, i){
+      if (m.id === 'yellow') return;
+      if (eligible(m)){
+        m.state = 'walk-to-picnic';
+        m.goalX = crew.siteX + (i === 1 ? -26 : 26);
+        // hurry scaled to distance so a far-off man still lands inside the
+        // gather window instead of the flat errand pace leaving him short.
+        m.speed = Math.min(220, Math.max(70, Math.abs(m.goalX - m.x) / 3));
+      } else {
+        showBubble(m, 'hmph');
+      }
+    });
+  }
+
+  function updateCrew(dt){
+    men.forEach(function(m){
+      if (m.state === 'walk-to-picnic'){
+        moveToward(m, dt);
+        m.phase += dt * (m.speed/10);
+        if (Math.abs(m.goalX - m.x) < 1){ m.state = 'picnic'; m.stateT = 0; m.phase = 0; }
+        return;
+      }
+      updateMan(m, dt);
+    });
+
+    if (crew.state === 'gathering'){
+      crew.t += dt;
+      var stillWalking = men.some(function(m){ return m.state === 'walk-to-picnic'; });
+      if (!stillWalking || crew.t >= 6){
+        // anyone not there yet gave it their best shot; the meal starts without them
+        men.forEach(function(m){ if (m.state === 'walk-to-picnic'){ m.state = 'rest'; m.restT = 0.4; } });
+        crew.state = 'picnic';
+        crew.t = 0;
+      }
+    } else if (crew.state === 'picnic'){
+      crew.t += dt;
+      if (crew.t >= 8){
+        crew.state = 'idle';
+        men.forEach(function(m){
+          // catches stragglers still mid-walk to the site, not just seated ones
+          if (m.state === 'picnic' || m.state === 'walk-to-picnic'){ m.state = 'rest'; m.restT = 1; m.carrying = false; }
+        });
+      }
+    } else if (crew.state === 'party'){
+      crew.t += dt;
+      if (crew.t >= 6){
+        crew.state = 'idle';
+        men.forEach(function(m){ if (m.state === 'party'){ m.state = 'rest'; m.restT = 1; m.hop = 0; } });
+      }
+    }
+    // crew.state 'errand' needs no polling here: gatherPicnic() (called from
+    // yellow's own errand-back update, above) advances it to 'gathering' itself.
+  }
+
+  function browsFor(m){
+    if (m.temper === 'angry') return 'angry';
+    if (m.temper === 'happy') return 'happy';
+    return 'flat';
+  }
+  function mouthFor(m){
+    if (m.temper === 'angry') return 'frown';
+    if (m.temper === 'happy') return 'smile';
+    if (m.state === 'party' || m.state === 'picnic') return 'smile';
+    return 'flat';
+  }
+
+  function drawTaskbar(){
+    tbCtx.clearRect(0,0,tbW,tbH);
+    tbCtx.fillStyle = 'rgba(32,33,36,0.94)';
+    tbCtx.fillRect(0,0,tbW,tbH);
+    tbCtx.fillStyle = 'rgba(255,255,255,0.08)';
+    tbCtx.fillRect(0,0,tbW,1);
+
+    // pinned app ghosts
+    tbCtx.fillStyle = 'rgba(255,255,255,0.06)';
+    [16,60,104].forEach(function(gx){
+      roundRect(tbCtx, gx, tbH/2 - 16, 32, 32, 7);
+      tbCtx.fill();
+    });
+
+    var groundY = tbH - 11;
+    men.forEach(function(m){
+      var o = {
+        x: m.x, y: groundY, scale: 0.92,
+        facing: m.facing,
+        paper: m.paper,
+        walk: (m.state==='walk'||m.state==='errand-out'||m.state==='errand-back'||m.state==='walk-to-picnic'||m.state==='sad') ? m.phase : 0,
+        brows: browsFor(m),
+        mouth: mouthFor(m),
+        look: m.blinkOn ? 0 : m.look,
+        blink: m.blinkOn,
+        lying: m.state === 'sleep',
+        sitting: m.state === 'picnic' || m.state === 'sad',
+        carrying: m.carrying,
+        hat: m.state === 'party',
+        hop: m.hop,
+        bubble: m.bubble,
+        zzz: m.state === 'sleep',
+        zzzT: performance.now()/1000
+      };
+      drawBoxMan(tbCtx, o);
+      if (m.state === 'picnic' && crew.state === 'picnic' && m.id === 'yellow'){
+        drawBox(tbCtx, m.x, groundY - 30, 0.92, true);
+      }
+    });
+  }
+
+  function startCrewEntrance(){
+    men.forEach(function(m, i){
+      m.x = tbW + 40 + i*70;
+      m.state = 'walk';
+      m.speed = REDUCED ? 0 : 70;
+      m.waitDelay = i * 0.45;
+      m.goalX = 90 + i*90;
+    });
+    if (REDUCED){
+      men.forEach(function(m, i){ m.x = 90 + i*90; m.state = 'rest'; m.restT = 999; });
+    }
+  }
+  // fallback in case DOMContentLoaded already fired before this ran
+  if (document.readyState !== 'loading'){ startCrewEntrance(); }
+
+  /* =====================================================================
+     Vignette canvases — pure functions of a looping local time t
+     ===================================================================== */
+  function vX(t, from, to, dur){
+    var u = Math.max(0, Math.min(1, t/dur));
+    return from + (to-from)*u;
+  }
+
+  var scenes = {
+    race: { loop:6, draw: function(ctx,w,h,t){
+      var ground = h - 16;
+      var colors = ['yellow','green','blue'];
+      var falls = t > 4.4;
+      colors.forEach(function(id, i){
+        var laneY = ground - i*0; // single lane, staggered x start
+        var startX = 20 + i*14;
+        var man;
+        if (t < 0.6){
+          man = { x: startX, walk:0 };
+        } else if (i === 2 && t >= 3.6) {
+          // blue trips near the end and lies down
+          var tx = vX(Math.min(t,3.6)-0.6, startX, w*0.72, 3.0);
+          man = { x: tx, walk: (Math.min(t,3.6)-0.6)*8, lying:true };
+        } else {
+          var travel = Math.min(t-0.6, 4.6);
+          var x = vX(travel, startX, w+30, 4.6);
+          man = { x:Math.min(x,w+30), walk: travel*8 };
+        }
+        var cheering = falls && i !== 2;
+        drawBoxMan(ctx, {
+          x: man.x, y: ground, scale:0.62, facing:1,
+          paper: PAPER[id].fill,
+          walk: man.lying ? 0 : man.walk,
+          lying: !!man.lying,
+          brows: cheering ? 'happy' : 'flat',
+          mouth: cheering ? 'smile' : 'flat',
+          hop: cheering ? Math.abs(Math.sin(t*10))*3 : 0
+        });
+      });
+    }},
+
+    pizza: { loop:9, draw: function(ctx,w,h,t){
+      var ground = h - 16;
+      var leftX = 40;
+      var siteX = leftX;
+      var yState;
+      if (t < 1.8){ yState = { x: vX(t, leftX, w+20, 1.8), walk:t*8 }; }
+      else if (t < 3){ yState = { x: w+20, walk:0, hidden:true }; }
+      else if (t < 4.8){ var u=t-3; yState = { x: vX(u, w+20, leftX, 1.8), walk:u*8, carrying:true, facing:-1 }; }
+      else { yState = { x: leftX, walk:0, carrying:true, sitting:true }; }
+
+      if (!yState.hidden){
+        drawBoxMan(ctx, {
+          x:yState.x, y:ground, scale:0.62, facing: yState.facing||1,
+          walk:yState.walk, paper:PAPER.yellow.fill,
+          carrying: !!yState.carrying, sitting: !!yState.sitting,
+          mouth: t>4.8 ? 'smile':'flat'
+        });
+      }
+      ['green','blue'].forEach(function(id, i){
+        var sit = t > 4.8;
+        var gx = siteX + (i===0?-22:22);
+        drawBoxMan(ctx, {
+          x: sit ? gx : siteX + (i===0?-40:40), y:ground, scale:0.62, facing:1,
+          paper:PAPER[id].fill, sitting: sit, mouth: sit ? 'smile':'flat',
+          walk: 0
+        });
+      });
+      if (t > 4.8){ drawBox(ctx, siteX, ground-24, 0.6, true); }
+    }},
+
+    icecream: { loop:8, draw: function(ctx,w,h,t){
+      var ground = h - 14;
+      var vanX;
+      if (t < 1.6){ vanX = vX(t, w+50, w*0.62, 1.6); }
+      else if (t < 5.5){ vanX = w*0.62; }
+      else { vanX = vX(t-5.5, w*0.62, w+60, 2.2); }
+      drawVan(ctx, vanX, ground, 0.55, -1);
+
+      if (t > 1.4 && t < 5.7){
+        ['green','blue'].forEach(function(id, i){
+          var served = t > 3 + i*1.1;
+          drawBoxMan(ctx, {
+            x: vanX - 46 - i*16, y: ground, scale:0.58, facing:-1,
+            paper: PAPER[id].fill,
+            mouth: served ? 'smile':'flat',
+            carrying: false
+          });
+          if (served){
+            ctx.save();
+            ctx.translate(vanX - 46 - i*16 - 10, ground - 30);
+            ctx.fillStyle = '#E8BD4A';
+            ctx.beginPath();
+            ctx.moveTo(-4,0); ctx.lineTo(4,0); ctx.lineTo(0,10);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = OUTLINE; ctx.lineWidth=1; ctx.stroke();
+            ctx.beginPath(); ctx.arc(0,-3,4,0,Math.PI*2);
+            ctx.fillStyle = '#FFF6E0'; ctx.fill(); ctx.stroke();
+            ctx.restore();
+          }
+        });
+      }
+    }},
+
+    nap: { loop:7, draw: function(ctx,w,h,t){
+      var ground = h - 14;
+      var midX = w*0.5;
+      var p1, p2, lying;
+      if (t < 2){
+        p1 = vX(t, 24, midX-10, 2);
+        p2 = vX(t, w-24, midX+10, 2);
+        lying = false;
+      } else {
+        p1 = midX - 9; p2 = midX + 9; lying = true;
+      }
+      drawBoxMan(ctx, { x:p1, y:ground, scale:0.6, facing:1, paper:PAPER.green.fill,
+        walk: lying?0:t*8, lying:lying, zzz:lying, zzzT:t });
+      drawBoxMan(ctx, { x:p2, y:ground, scale:0.6, facing:-1, paper:PAPER.blue.fill,
+        walk: lying?0:t*8, lying:lying, zzz:lying, zzzT:t+0.6 });
+    }},
+
+    birthday: { loop:6, draw: function(ctx,w,h,t){
+      var ground = h - 14;
+      var midX = w*0.5;
+      ['yellow','green','blue'].forEach(function(id,i){
+        var x = midX + (i-1)*34;
+        var hop = Math.abs(Math.sin(t*7 + i*0.7))*5;
+        drawBoxMan(ctx, {
+          x:x, y:ground, scale:0.58, facing:1, paper:PAPER[id].fill,
+          hat:true, hop:hop, mouth:'smile', brows:'happy'
+        });
+        if (i===1){
+          ctx.save();
+          ctx.font = '11px "JetBrains Mono", monospace';
+          ctx.fillStyle = OUTLINE;
+          ctx.globalAlpha = 0.4 + 0.6*Math.abs(Math.sin(t*3));
+          ctx.fillText('♪', x+14, ground - 46 - hop - ((t*10)%14));
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+      });
+    }},
+
+    ambulance: { loop:8, draw: function(ctx,w,h,t){
+      var ground = h - 14;
+      var lieX = w*0.32;
+      var vanX;
+      var loaded = t > 4.2;
+      if (t < 3){ vanX = w + 60; }
+      else if (t < 4.2){ vanX = vX(t-3, w+60, lieX+50, 1.2); }
+      else if (t < 6){ vanX = lieX+50; }
+      else { vanX = vX(t-6, lieX+50, w+70, 2); }
+
+      if (!loaded){
+        drawBoxMan(ctx, { x:lieX, y:ground, scale:0.62, facing:1, paper:PAPER.blue.fill, lying:true });
+      }
+      if (t > 2.4){ drawAmbulanceVan(ctx, vanX, ground, 0.55, -1); }
+    }}
+  };
+
+  var vignetteEls = Array.prototype.slice.call(document.querySelectorAll('canvas.vignette'));
+  var vignetteState = vignetteEls.map(function(el){
+    sizeCanvas(el, el.getContext('2d'), 300, 120);
+    return { el:el, ctx:el.getContext('2d'), key:el.dataset.scene, visible:true };
+  });
+
+  if (window.IntersectionObserver){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        var match = vignetteState.filter(function(v){ return v.el === entry.target; })[0];
+        if (match) match.visible = entry.isIntersecting;
+      });
+    }, { rootMargin: '80px' });
+    vignetteEls.forEach(function(el){ io.observe(el); });
+  }
+
+  /* =====================================================================
+     Main loop
+     ===================================================================== */
+  var lastT = null;
+  function frame(now){
+    requestAnimationFrame(frame);
+    if (document.hidden) { lastT = now; return; }
+    if (lastT === null) lastT = now;
+    var dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    if (!REDUCED){ updateCrew(dt); }
+    else {
+      men.forEach(function(m){
+        m.blinkT -= dt; if (m.blinkT <= 0){ m.blinkOn = true; m.blinkDur = 0.12; m.blinkT = 4; }
+        if (m.blinkOn){ m.blinkDur -= dt; if (m.blinkDur<=0) m.blinkOn=false; }
+      });
+    }
+    drawTaskbar();
+
+    vignetteState.forEach(function(v){
+      if (!v.visible) return;
+      var scene = scenes[v.key];
+      if (!scene) return;
+      var t = REDUCED ? scene.loop*0.6 : (now/1000) % scene.loop;
+      v.ctx.clearRect(0,0,300,120);
+      scene.draw(v.ctx, 300, 120, t);
+    });
+  }
+  requestAnimationFrame(frame);
+
+  /* =====================================================================
+     Reading the demo note
+     ===================================================================== */
+  var input = document.getElementById('demo-input');
+  var PIZZA_RE = /\b(pizza|hungry|starving)\b/;
+  var BDAY_RE = /\b(birthday|bday)\b/;
+  var TEMPER = {
+    angry:  /\b(angry|mad|furious|rage|hate|grr|argh)\b/g,
+    sad:    /\b(sad|unhappy|lonely|tears|gloomy)\b/g,
+    happy:  /\b(happy|joy|yay|love|glad)\b/g,
+    sleepy: /\b(sleepy|sleep|tired|yawn|zzz|nap)\b/g
+  };
+  var pizzaPresent = false, bdayPresent = false;
+  var debounceId = null;
+
+  function countMatches(re, text){
+    var m = text.match(re);
+    return m ? m.length : 0;
+  }
+
+  function processText(){
+    var text = input.value.toLowerCase();
+
+    var nowPizza = PIZZA_RE.test(text);
+    if (nowPizza && !pizzaPresent) triggerPizza();
+    pizzaPresent = nowPizza;
+
+    var nowBday = BDAY_RE.test(text);
+    if (nowBday && !bdayPresent) triggerBirthday();
+    bdayPresent = nowBday;
+
+    var best = 'neutral', bestCount = 0;
+    ['angry','sad','happy','sleepy'].forEach(function(key){
+      var c = countMatches(TEMPER[key], text);
+      if (c > bestCount){ bestCount = c; best = key; }
+    });
+    applyTemper(best);
+  }
+
+  input.addEventListener('input', function(){
+    clearTimeout(debounceId);
+    debounceId = setTimeout(processText, 250);
+  });
+
+  document.querySelectorAll('.chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      var sep = input.value.length && !/\s$/.test(input.value) ? ' ' : '';
+      input.value += sep + chip.dataset.word + ' ';
+      clearTimeout(debounceId);
+      processText();
+      input.focus();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
