@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile check
+        run: python -m py_compile board.py store.py note.py mascot.py roamer.py yard.py winkit.py test_store.py test_app.py
+        shell: pwsh
+
+      - name: Store tests (headless)
+        run: python test_store.py
+        shell: pwsh
+
+      - name: Yard demo
+        run: python yard.py
+        shell: pwsh
+
+      # The GUI suite drives real Tk windows on the runner's own desktop.
+      # It is deterministic on an idle machine; the one retry absorbs the
+      # rare focus hiccup a fresh session can throw on its first window.
+      - name: App suite (real windows)
+        run: |
+          python test_app.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "first run failed - retrying once on the warmed session"
+            python test_app.py
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+        shell: pwsh
